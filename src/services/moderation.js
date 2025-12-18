@@ -9,9 +9,11 @@ const { createErrorEmbed } = require('../utils/embeds');
 function getModeratedChannels() {
     const channels = {};
     
-    // Wager alerts channel (also known as OPEN_CHALLENGES_CHANNEL)
-    if (process.env.WAGER_ALERTS_CHANNEL || process.env.OPEN_CHALLENGES_CHANNEL) {
-        channels.wagerAlerts = process.env.OPEN_CHALLENGES_CHANNEL || process.env.WAGER_ALERTS_CHANNEL;
+    // Wager alerts channel (OPEN_CHALLENGES_CHANNEL is an alias for WAGER_ALERTS_CHANNEL)
+    // Priority: WAGER_ALERTS_CHANNEL takes precedence if both are set
+    const wagerAlertsChannel = process.env.WAGER_ALERTS_CHANNEL || process.env.OPEN_CHALLENGES_CHANNEL;
+    if (wagerAlertsChannel) {
+        channels.wagerAlerts = wagerAlertsChannel;
     }
     
     // Disputes channel

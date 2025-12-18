@@ -172,10 +172,13 @@ async function verifySteamAccount(username) {
     }
     
     try {
+        // Steam ID64 is always 17 digits
+        const STEAM_ID64_LENGTH = 17;
         let steamId = username;
         
         // If username is not a Steam ID64, try to resolve it
-        if (!/^\d{17}$/.test(username)) {
+        const steamIdPattern = new RegExp(`^\\d{${STEAM_ID64_LENGTH}}$`);
+        if (!steamIdPattern.test(username)) {
             // Resolve custom URL to Steam ID
             const resolveUrl = `https://api.steampowered.com/ISteamUser/ResolveVanityURL/v1/?key=${apiKey}&vanityurl=${encodeURIComponent(username)}`;
             const resolveData = await httpsGet(resolveUrl);
@@ -199,7 +202,8 @@ async function verifySteamAccount(username) {
             const player = summaryData.response.players[0];
             
             // Check if CS2 is owned (App ID: 730)
-            const ownedGamesUrl = `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${apiKey}&steamid=${steamId}&appids_filter[0]=730`;
+            const CS2_APP_ID = 730;
+            const ownedGamesUrl = `https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/?key=${apiKey}&steamid=${steamId}&appids_filter=${CS2_APP_ID}`;
             let ownsCS2 = false;
             
             try {

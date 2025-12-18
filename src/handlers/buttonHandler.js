@@ -100,7 +100,9 @@ async function handleViewWager(interaction) {
 }
 
 async function handleLftJoin(interaction, side) {
-    const wagerId = parseInt(interaction.customId.split('_')[3]);
+    // Custom ID format: lft_join_{side}_{wagerId}
+    const WAGER_ID_INDEX = 3;
+    const wagerId = parseInt(interaction.customId.split('_')[WAGER_ID_INDEX]);
 
     // Check if user is verified
     const user = userOps.get(interaction.user.id);
