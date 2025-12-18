@@ -1,8 +1,13 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { userOps, wagerOps, disputeOps, teamOps, participantOps, disputeVoteOps } = require('../services/database');
-const { createWagerEmbed, createErrorEmbed, createSuccessEmbed } = require('../utils/embeds');
+const { createWagerEmbed, createErrorEmbed, createSuccessEmbed, createDepositInstructionsEmbed } = require('../utils/embeds');
 const { GAME_CHOICES, PLATFORM_FEE, TEAM_SIZES, WAGER_TYPES, MATCH_TYPE_CHOICES, isValidProofUrl, calculatePayout, calculateFee } = require('../utils/constants');
 const { sendWagerAlert, notifyWagerAccepted, notifyWagerSubmitted, notifyWagerCompleted, notifyDispute, sendMatchResult, sendDisputeAlert } = require('../services/notifications');
+const EscrowService = require('../services/escrow');
+const db = require('../services/database');
+
+// Initialize escrow service
+const escrowService = new EscrowService(db);
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -238,6 +243,9 @@ async function handleCreate(interaction) {
     const fee = calculateFee(amount).toFixed(4);
     const payout = calculatePayout(amount).toFixed(4);
 
+    // Create escrow account for this wager
+    const escrowAccount = escrowService.createEscrowAccount(wagerId);
+
     // Get match type display name
     const matchTypeDisplay = MATCH_TYPE_CHOICES.find(mt => mt.value === matchType)?.name || matchType;
 
@@ -259,23 +267,33 @@ async function handleCreate(interaction) {
 
     message += `**Opponent:** ${opponent ? opponent.toString() : 'Open Challenge'}\n\n`;
 
+    // Add escrow information
+    message += `🔐 **Escrow Address:** \`${escrowAccount.escrowAddress}\`\n`;
+    message += `💰 **You must deposit ${amount} ETH** to the escrow address before the match starts.\n\n`;
+
     // Add verification requirement info
     if (matchType === 'custom' || matchType === 'creative') {
         message += `⚠️ **Proof Required:** Upload screenshot/video when submitting results.\n`;
     }
 
     if (opponent) {
-        message += 'Your opponent has been notified.';
+        message += 'Your opponent has been notified.\n\n';
+        message += `📥 **Next Step:** Use \`/escrow deposit ${wagerId} <tx_hash>\` after depositing.`;
     } else if (wagerType === WAGER_TYPES.LFT) {
         message += `Players can join your team using \`/wager lft-join ${wagerId} creator\`.\n`;
-        message += `Opponents can join using \`/wager lft-join ${wagerId} opponent\`.`;
+        message += `Opponents can join using \`/wager lft-join ${wagerId} opponent\`.\n\n`;
+        message += `📥 **Next Step:** Use \`/escrow deposit ${wagerId} <tx_hash>\` after depositing.`;
     } else {
-        message += `Other players can accept this challenge using \`/wager accept ${wagerId}\`.`;
+        message += `Other players can accept this challenge using \`/wager accept ${wagerId}\`.\n\n`;
+        message += `📥 **Next Step:** Use \`/escrow deposit ${wagerId} <tx_hash>\` after depositing.`;
     }
 
     const embed = createSuccessEmbed(message);
 
-    await interaction.reply({ embeds: [embed] });
+    // Send deposit instructions as second embed
+    const depositEmbed = createDepositInstructionsEmbed(wagerId, escrowAccount.escrowAddress, amount);
+
+    await interaction.reply({ embeds: [embed, depositEmbed] });
 
     // Send wager alert to channel
     await sendWagerAlert(interaction.client, wager);
@@ -318,16 +336,25 @@ async function handleAccept(interaction) {
     // Accept wager
     wagerOps.accept(wagerId, interaction.user.id);
 
+    // Get escrow account
+    const escrowStatus = escrowService.getEscrowStatus(wagerId);
+
     const gameName = GAME_CHOICES.find(g => g.value === wager.game)?.name || wager.game;
     const embed = createSuccessEmbed(
         `✅ Challenge accepted!\n\n` +
         `**Wager ID:** ${wagerId}\n` +
         `**Game:** ${gameName}\n` +
         `**Amount:** ${wager.amount} ETH\n\n` +
-        `The match is now in progress. Submit your win proof using \`/wager submit ${wagerId} <match_id>\` when you win.`
+        `🔐 **Escrow Address:** \`${escrowStatus.escrowAddress}\`\n` +
+        `💰 **You must deposit ${wager.amount} ETH** to the escrow address.\n\n` +
+        `📥 **Next Step:** Use \`/escrow deposit ${wagerId} <tx_hash>\` after depositing.\n\n` +
+        `⚠️ **Both parties must deposit before the match can begin.**`
     );
 
-    await interaction.reply({ embeds: [embed] });
+    // Send deposit instructions as second embed
+    const depositEmbed = createDepositInstructionsEmbed(wagerId, escrowStatus.escrowAddress, wager.amount);
+
+    await interaction.reply({ embeds: [embed, depositEmbed] });
 
     // Notify both players
     const updatedWager = wagerOps.get(wagerId);
@@ -444,6 +471,13 @@ async function handleSubmit(interaction) {
             
             const loserId = interaction.user.id === wager.creator_id ? wager.opponent_id : wager.creator_id;
             
+            // Release escrowed funds to winner
+            try {
+                escrowService.releaseFunds(wagerId, interaction.user.id);
+            } catch (error) {
+                console.error('Error releasing escrow funds:', error);
+            }
+            
             // Update balances
             const payout = calculatePayout(wager.amount);
             userOps.updateBalance(interaction.user.id, payout);
@@ -482,11 +516,19 @@ async function handleDispute(interaction) {
     const disputeId = disputeOps.create(wagerId, interaction.user.id, reason);
     wagerOps.dispute(wagerId);
 
+    // Lock escrow funds during dispute
+    try {
+        escrowService.lockFunds(wagerId);
+    } catch (error) {
+        console.error('Error locking escrow funds:', error);
+    }
+
     const embed = createSuccessEmbed(
         `✅ Dispute filed successfully!\n\n` +
         `**Wager ID:** ${wagerId}\n` +
         `**Dispute ID:** ${disputeId}\n` +
         `**Reason:** ${reason}\n\n` +
+        `🔒 **Escrow funds have been locked** until the dispute is resolved.\n\n` +
         `A moderator will review your dispute and make a decision.`
     );
 
