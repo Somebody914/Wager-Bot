@@ -147,11 +147,24 @@ function createHelpEmbed() {
             },
             {
                 name: '🎮 Wager Commands',
-                value: '`/wager create <game> <amount> [opponent]` - Create a new wager\n' +
+                value: '`/wager create <game> <amount> [match_type]` - Create a new wager\n' +
                        '`/wager accept <id>` - Accept an open challenge\n' +
                        '`/wager status <id>` - Check wager details\n' +
-                       '`/wager submit <id> <match_id>` - Submit win proof\n' +
-                       '`/wager dispute <id> <reason>` - File a dispute'
+                       '`/wager submit <id> [match_id] [proof_url]` - Submit win proof\n' +
+                       '`/wager dispute <id> <reason>` - File a dispute\n' +
+                       '`/wager lft-join <id> <side>` - Join LFT wager'
+            },
+            {
+                name: '⚖️ Dispute Commands',
+                value: '`/dispute counter-proof <dispute_id> <proof_url>` - Submit counter evidence\n' +
+                       '`/dispute vote <dispute_id> <side>` - Vote on a dispute\n' +
+                       '`/dispute resolve <dispute_id> <winner>` - Resolve dispute (Moderators)'
+            },
+            {
+                name: '👥 Team Commands',
+                value: '`/team create <name> <game>` - Create a team\n' +
+                       '`/team invite <team_id> <@user>` - Invite to team\n' +
+                       '`/team roster [team_id]` - View team roster'
             },
             {
                 name: '📊 Statistics',
@@ -159,11 +172,18 @@ function createHelpEmbed() {
                        '`/leaderboard [game]` - View top players'
             },
             {
+                name: '🎯 Match Types',
+                value: '**Ranked/Competitive**: API-verified matches (Valorant, LoL)\n' +
+                       '**Custom/Creative**: Requires screenshot/video proof\n' +
+                       'Supported proof: Discord attachments, Imgur, YouTube, Streamable'
+            },
+            {
                 name: '💡 Tips',
                 value: '• Wagers require 3% platform fee\n' +
                        '• Winner receives 97% of total pot\n' +
-                       '• Submit match IDs for verification\n' +
-                       '• Disputes are reviewed manually'
+                       '• Custom matches need proof URLs\n' +
+                       '• Disputes can be voted on by community\n' +
+                       '• Moderators resolve contested disputes'
             }
         )
         .setTimestamp();

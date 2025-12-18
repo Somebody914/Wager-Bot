@@ -355,9 +355,214 @@ async function verifyGameAccount(platform, username) {
     }
 }
 
+/**
+ * Verify a Valorant match result
+ * @param {string} matchId - The match ID from Riot API
+ * @param {string} puuid - Player's PUUID
+ * @param {string} region - Region (americas, europe, asia)
+ * @returns {Promise<Object>} Verification result with match details
+ */
+async function verifyValorantMatch(matchId, puuid, region = 'americas') {
+    const apiKey = process.env.RIOT_API_KEY;
+    
+    if (!apiKey) {
+        return {
+            success: false,
+            error: 'Riot API key not configured.',
+            verified: false
+        };
+    }
+
+    try {
+        // Get match details
+        const matchUrl = `https://${region}.api.riotgames.com/val/match/v1/matches/${matchId}`;
+        const matchData = await httpsGet(matchUrl, {
+            'X-Riot-Token': apiKey
+        });
+
+        if (!matchData || !matchData.players) {
+            return {
+                success: false,
+                error: 'Match not found or invalid match ID.',
+                verified: false
+            };
+        }
+
+        // Find player in match
+        const player = matchData.players.find(p => p.puuid === puuid);
+        
+        if (!player) {
+            return {
+                success: false,
+                error: 'Player not found in this match.',
+                verified: false
+            };
+        }
+
+        // Determine if player won
+        const playerTeam = player.teamId;
+        const winningTeam = matchData.teams.find(t => t.won)?.teamId;
+        const playerWon = playerTeam === winningTeam;
+
+        return {
+            success: true,
+            verified: true,
+            matchId: matchId,
+            playerWon: playerWon,
+            playerTeam: playerTeam,
+            winningTeam: winningTeam,
+            gameMode: matchData.matchInfo?.mode || 'Unknown',
+            mapName: matchData.matchInfo?.mapId || 'Unknown'
+        };
+    } catch (error) {
+        console.error('Valorant match verification error:', error);
+        
+        if (error.message.includes('404')) {
+            return {
+                success: false,
+                error: 'Match not found. Please check the match ID.',
+                verified: false
+            };
+        }
+        
+        return {
+            success: false,
+            error: 'Failed to verify match. Please try again later.',
+            verified: false
+        };
+    }
+}
+
+/**
+ * Verify a League of Legends match result
+ * @param {string} matchId - The match ID from Riot API
+ * @param {string} puuid - Player's PUUID
+ * @param {string} region - Region (americas, europe, asia)
+ * @returns {Promise<Object>} Verification result with match details
+ */
+async function verifyLeagueMatch(matchId, puuid, region = 'americas') {
+    const apiKey = process.env.RIOT_API_KEY;
+    
+    if (!apiKey) {
+        return {
+            success: false,
+            error: 'Riot API key not configured.',
+            verified: false
+        };
+    }
+
+    try {
+        // Get match details
+        const matchUrl = `https://${region}.api.riotgames.com/lol/match/v5/matches/${matchId}`;
+        const matchData = await httpsGet(matchUrl, {
+            'X-Riot-Token': apiKey
+        });
+
+        if (!matchData || !matchData.info) {
+            return {
+                success: false,
+                error: 'Match not found or invalid match ID.',
+                verified: false
+            };
+        }
+
+        // Find player in match
+        const participant = matchData.info.participants.find(p => p.puuid === puuid);
+        
+        if (!participant) {
+            return {
+                success: false,
+                error: 'Player not found in this match.',
+                verified: false
+            };
+        }
+
+        return {
+            success: true,
+            verified: true,
+            matchId: matchId,
+            playerWon: participant.win,
+            championName: participant.championName,
+            gameMode: matchData.info.gameMode,
+            gameDuration: matchData.info.gameDuration
+        };
+    } catch (error) {
+        console.error('League match verification error:', error);
+        
+        if (error.message.includes('404')) {
+            return {
+                success: false,
+                error: 'Match not found. Please check the match ID.',
+                verified: false
+            };
+        }
+        
+        return {
+            success: false,
+            error: 'Failed to verify match. Please try again later.',
+            verified: false
+        };
+    }
+}
+
+/**
+ * Verify match result based on game
+ * @param {string} game - Game identifier
+ * @param {string} matchId - Match ID
+ * @param {string} userId - Discord user ID
+ * @returns {Promise<Object>} Verification result
+ */
+async function verifyMatchResult(game, matchId, userId) {
+    const { linkedAccountOps } = require('./database');
+    
+    // Get linked account for the game
+    const linkedAccount = linkedAccountOps.get(userId, game);
+    
+    if (!linkedAccount || !linkedAccount.verified) {
+        return {
+            success: false,
+            error: `No verified ${game} account linked. Please link your account first using /link.`,
+            verified: false
+        };
+    }
+
+    switch (game) {
+        case 'valorant':
+            return await verifyValorantMatch(matchId, linkedAccount.platform_id);
+        
+        case 'lol':
+            return await verifyLeagueMatch(matchId, linkedAccount.platform_id);
+        
+        case 'cs2':
+        case 'rocket_league':
+        case 'fortnite':
+        case 'apex':
+        case 'r6':
+            // These games either don't have public APIs for match verification
+            // or require additional implementation
+            return {
+                success: false,
+                error: `Automatic match verification not available for ${game}. Please use proof_url instead.`,
+                verified: false,
+                requiresManualProof: true
+            };
+        
+        default:
+            return {
+                success: false,
+                error: 'Unsupported game for automatic verification.',
+                verified: false,
+                requiresManualProof: true
+            };
+    }
+}
+
 module.exports = {
     verifyGameAccount,
     verifyRiotAccount,
     verifySteamAccount,
-    verifyTrackerAccount
+    verifyTrackerAccount,
+    verifyValorantMatch,
+    verifyLeagueMatch,
+    verifyMatchResult
 };
