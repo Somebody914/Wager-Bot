@@ -1,12 +1,13 @@
 const { EmbedBuilder } = require('discord.js');
-const { COLORS, PLATFORM_FEE } = require('./constants');
+const { COLORS, calculatePayout, calculateFee } = require('./constants');
 
 function createWagerEmbed(wager, creator, opponent = null) {
-    const fee = (wager.amount * PLATFORM_FEE).toFixed(4);
-    const payout = (wager.amount * 2 * (1 - PLATFORM_FEE)).toFixed(4);
+    const fee = calculateFee(wager.amount).toFixed(4);
+    const payout = calculatePayout(wager.amount).toFixed(4);
 
     const teamSize = wager.team_size || 1;
     const wagerType = wager.wager_type || 'solo';
+    const matchType = wager.match_type || 'ranked';
 
     const embed = new EmbedBuilder()
         .setTitle(`🎮 ${wager.game} Wager #${wager.id}${teamSize > 1 ? ` (${teamSize}v${teamSize})` : ''}`)
@@ -20,9 +21,18 @@ function createWagerEmbed(wager, creator, opponent = null) {
             { name: 'Status', value: wager.status.toUpperCase(), inline: true }
         );
 
+    // Add match type
+    const matchTypeEmoji = matchType === 'ranked' || matchType === 'competitive' ? '✅' : '📸';
+    embed.addFields({ name: 'Match Type', value: `${matchTypeEmoji} ${matchType.toUpperCase()}`, inline: true });
+
     if (teamSize > 1) {
         const typeDisplay = wagerType === 'lft' ? '🔍 LFT (Looking For Teammates)' : '👥 Team Wager';
         embed.addFields({ name: 'Type', value: typeDisplay, inline: true });
+    }
+
+    // Add proof URL if available
+    if (wager.proof_url) {
+        embed.addFields({ name: 'Proof', value: wager.proof_url });
     }
 
     embed.setTimestamp(new Date(wager.created_at))
@@ -32,8 +42,8 @@ function createWagerEmbed(wager, creator, opponent = null) {
 }
 
 function createMatchResultEmbed(wager, winner, loser) {
-    const fee = (wager.amount * PLATFORM_FEE).toFixed(4);
-    const payout = (wager.amount * 2 * (1 - PLATFORM_FEE)).toFixed(4);
+    const fee = calculateFee(wager.amount).toFixed(4);
+    const payout = calculatePayout(wager.amount).toFixed(4);
 
     const embed = new EmbedBuilder()
         .setTitle(`🏆 Match Result - ${wager.game}`)
@@ -61,8 +71,19 @@ function createDisputeEmbed(wager, dispute, filer) {
             { name: 'Amount', value: `${wager.amount} ETH`, inline: true },
             { name: 'Filed By', value: `<@${dispute.filer_id}>`, inline: true },
             { name: 'Reason', value: dispute.reason }
-        )
-        .setTimestamp(new Date(dispute.created_at))
+        );
+
+    // Add original proof if available
+    if (wager.proof_url) {
+        embed.addFields({ name: 'Original Proof', value: wager.proof_url });
+    }
+
+    // Add counter-proof if available
+    if (dispute.counter_proof) {
+        embed.addFields({ name: 'Counter-Proof', value: dispute.counter_proof });
+    }
+
+    embed.setTimestamp(new Date(dispute.created_at))
         .setFooter({ text: `Dispute ID: ${dispute.id}` });
 
     return embed;
@@ -126,11 +147,24 @@ function createHelpEmbed() {
             },
             {
                 name: '🎮 Wager Commands',
-                value: '`/wager create <game> <amount> [opponent]` - Create a new wager\n' +
+                value: '`/wager create <game> <amount> [match_type]` - Create a new wager\n' +
                        '`/wager accept <id>` - Accept an open challenge\n' +
                        '`/wager status <id>` - Check wager details\n' +
-                       '`/wager submit <id> <match_id>` - Submit win proof\n' +
-                       '`/wager dispute <id> <reason>` - File a dispute'
+                       '`/wager submit <id> [match_id] [proof_url]` - Submit win proof\n' +
+                       '`/wager dispute <id> <reason>` - File a dispute\n' +
+                       '`/wager lft-join <id> <side>` - Join LFT wager'
+            },
+            {
+                name: '⚖️ Dispute Commands',
+                value: '`/dispute counter-proof <dispute_id> <proof_url>` - Submit counter evidence\n' +
+                       '`/dispute vote <dispute_id> <side>` - Vote on a dispute\n' +
+                       '`/dispute resolve <dispute_id> <winner>` - Resolve dispute (Moderators)'
+            },
+            {
+                name: '👥 Team Commands',
+                value: '`/team create <name> <game>` - Create a team\n' +
+                       '`/team invite <team_id> <@user>` - Invite to team\n' +
+                       '`/team roster [team_id]` - View team roster'
             },
             {
                 name: '📊 Statistics',
@@ -138,11 +172,18 @@ function createHelpEmbed() {
                        '`/leaderboard [game]` - View top players'
             },
             {
+                name: '🎯 Match Types',
+                value: '**Ranked/Competitive**: API-verified matches (Valorant, LoL)\n' +
+                       '**Custom/Creative**: Requires screenshot/video proof\n' +
+                       'Supported proof: Discord attachments, Imgur, YouTube, Streamable'
+            },
+            {
                 name: '💡 Tips',
                 value: '• Wagers require 3% platform fee\n' +
                        '• Winner receives 97% of total pot\n' +
-                       '• Submit match IDs for verification\n' +
-                       '• Disputes are reviewed manually'
+                       '• Custom matches need proof URLs\n' +
+                       '• Disputes can be voted on by community\n' +
+                       '• Moderators resolve contested disputes'
             }
         )
         .setTimestamp();

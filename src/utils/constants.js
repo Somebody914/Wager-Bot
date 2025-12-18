@@ -37,6 +37,21 @@ const WAGER_TYPES = {
     LFT: 'lft' // Looking for teammates
 };
 
+// Match types
+const MATCH_TYPES = {
+    RANKED: 'ranked',
+    COMPETITIVE: 'competitive',
+    CUSTOM: 'custom',
+    CREATIVE: 'creative'
+};
+
+const MATCH_TYPE_CHOICES = [
+    { name: 'Ranked/Competitive (API Verified)', value: 'ranked' },
+    { name: 'Competitive Match', value: 'competitive' },
+    { name: 'Custom/Private Match (Requires Proof)', value: 'custom' },
+    { name: 'Creative Mode (Requires Proof)', value: 'creative' }
+];
+
 // Wager statuses
 const WAGER_STATUS = {
     OPEN: 'open',
@@ -60,12 +75,61 @@ const COLORS = {
     INFO: 0x5865F2
 };
 
+// URL validation helpers
+function isValidProofUrl(url) {
+    if (!url) return false;
+    
+    try {
+        const urlObj = new URL(url);
+        const hostname = urlObj.hostname.toLowerCase();
+        
+        // Discord CDN attachments - must be exact hostname match
+        if (hostname === 'cdn.discordapp.com' || hostname === 'media.discordapp.net') {
+            return true;
+        }
+        
+        // Imgur - exact hostname match
+        if (hostname === 'imgur.com' || hostname === 'i.imgur.com') {
+            return true;
+        }
+        
+        // YouTube - exact hostname match
+        if (hostname === 'youtube.com' || hostname === 'www.youtube.com' || hostname === 'youtu.be') {
+            return true;
+        }
+        
+        // Streamable - exact hostname match
+        if (hostname === 'streamable.com' || hostname === 'www.streamable.com') {
+            return true;
+        }
+        
+        return false;
+    } catch (error) {
+        // Invalid URL format
+        return false;
+    }
+}
+
+// Payout calculation helper
+function calculatePayout(amount) {
+    return amount * 2 * (1 - PLATFORM_FEE);
+}
+
+function calculateFee(amount) {
+    return amount * PLATFORM_FEE;
+}
+
 module.exports = {
     GAMES,
     GAME_CHOICES,
     TEAM_SIZES,
     WAGER_TYPES,
+    MATCH_TYPES,
+    MATCH_TYPE_CHOICES,
     WAGER_STATUS,
     PLATFORM_FEE,
-    COLORS
+    COLORS,
+    isValidProofUrl,
+    calculatePayout,
+    calculateFee
 };

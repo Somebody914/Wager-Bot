@@ -9,8 +9,9 @@ A comprehensive Discord bot for managing crypto gaming wagers on the Wager platf
 - **Gaming Account Linking**: Connect and verify accounts from supported games with real API verification
 - **Solo & Team Wagers**: Create 1v1 wagers or team-based matches (2v2, 3v3, 5v5 depending on game)
 - **LFT System**: Looking For Teammates - join team wagers as individual players
-- **Match Verification**: Submit proof and track match results
-- **Dispute System**: File and resolve disputes with moderators
+- **Match Verification**: Automatic API verification for ranked matches OR proof upload for custom/creative modes
+- **Proof Upload System**: Screenshot/video proof support for custom matches via Discord, Imgur, YouTube, Streamable
+- **Enhanced Dispute System**: Counter-proof submission, community voting, and moderator resolution
 - **Statistics Tracking**: View wins, losses, and earnings
 - **Leaderboards**: See top players overall or by game
 - **Team Management**: Create, manage, and organize teams
@@ -38,6 +39,10 @@ A comprehensive Discord bot for managing crypto gaming wagers on the Wager platf
   - Riot Games API (Valorant & League of Legends)
   - Steam API (CS2)
   - Tracker.gg API (Rocket League, R6, Fortnite, Apex Legends)
+- **Match Verification System**: Game-specific verification methods
+  - **Ranked/Competitive**: Automatic API verification (Valorant, LoL)
+  - **Custom/Creative**: Manual proof upload with screenshot/video
+- **Proof Validation**: Supports Discord attachments, Imgur, YouTube, and Streamable links
 - **Channel Moderation**: Auto-delete non-bot messages in dedicated channels
 - **Warning System**: Automatic DM warnings for users who post in moderated channels
 
@@ -62,15 +67,23 @@ A comprehensive Discord bot for managing crypto gaming wagers on the Wager platf
 - `/balance` - Check your escrow balance
 
 ### Wager Commands
-- `/wager create <game> <amount> [opponent] [team_size] [team_id]` - Create a new wager
-  - Solo: `/wager create game:Valorant amount:0.1`
+- `/wager create <game> <amount> [opponent] [team_size] [team_id] [match_type]` - Create a new wager
+  - Solo Ranked: `/wager create game:Valorant amount:0.1 match_type:ranked`
+  - Custom Match: `/wager create game:Fortnite amount:0.05 match_type:custom`
   - Team (with existing team): `/wager create game:CS2 amount:0.2 team_size:5 team_id:1`
   - LFT (Looking For Teammates): `/wager create game:Rocket_League amount:0.15 team_size:3`
 - `/wager accept <id>` - Accept an open challenge
 - `/wager lft-join <id> <side>` - Join an LFT wager (creator or opponent side)
 - `/wager status <id>` - Check wager details and status
-- `/wager submit <id> <match_id>` - Submit win proof with match ID
+- `/wager submit <id> [match_id] [proof_url]` - Submit win proof
+  - Ranked/Competitive: `/wager submit id:1 match_id:VAL-NA1-12345`
+  - Custom/Creative: `/wager submit id:1 proof_url:https://imgur.com/abc123`
 - `/wager dispute <id> <reason>` - File a dispute on a wager
+
+### Dispute Commands
+- `/dispute counter-proof <dispute_id> <proof_url>` - Submit counter evidence for a dispute
+- `/dispute vote <dispute_id> <side>` - Vote on a disputed wager (community members)
+- `/dispute resolve <dispute_id> <winner> [reason]` - Resolve a dispute (Moderators only)
 
 ### Team Commands
 - `/team create <name> <game>` - Create a new team
@@ -85,6 +98,43 @@ A comprehensive Discord bot for managing crypto gaming wagers on the Wager platf
 
 ### Help
 - `/help` - Show all available commands
+
+## Match Types & Verification
+
+The bot supports different match types with appropriate verification methods:
+
+| Match Type | Description | Verification Method | Supported Games |
+|------------|-------------|---------------------|-----------------|
+| **Ranked/Competitive** | Official ranked matches | ✅ Automatic API verification | Valorant, League of Legends |
+| **Competitive** | Competitive mode matches | ⚠️ Manual verification required | CS2, Rocket League, R6 |
+| **Custom** | Private/Custom matches | 📸 Screenshot/Video proof required | All games |
+| **Creative** | Creative mode matches | 📸 Screenshot/Video proof required | Fortnite |
+
+### Proof Requirements
+
+**For Custom/Creative matches**, you must provide a proof_url when submitting:
+- **Discord Attachments**: Upload screenshot to Discord and copy the attachment URL
+- **Imgur**: Upload to imgur.com and share the link
+- **YouTube**: Upload video and share the link
+- **Streamable**: Upload video to streamable.com and share the link
+
+**Example:**
+```
+/wager submit id:1 proof_url:https://i.imgur.com/abc123.png
+```
+
+### API-Verified Games
+
+Games with automatic match verification:
+
+**Valorant & League of Legends** (Riot Games API):
+- Ranked and competitive matches can be verified automatically
+- Provide the match ID when submitting: `/wager submit id:1 match_id:VAL-NA1-12345`
+- Creative/custom matches require proof URL
+
+**Other Games** (CS2, Rocket League, Fortnite, etc.):
+- Currently require manual proof for all match types
+- Future updates may add tracker-based verification
 
 ## Setup Instructions
 
@@ -286,6 +336,8 @@ The bot uses SQLite with the following tables:
 - `winner_id` (Foreign Key, nullable)
 - `match_id` (String, nullable)
 - `proof` (String, nullable)
+- `proof_url` (String, nullable) - NEW: Screenshot/video proof URL
+- `match_type` (String) - NEW: ranked/competitive/custom/creative
 - `created_at` (Timestamp)
 - `updated_at` (Timestamp)
 
@@ -295,9 +347,17 @@ The bot uses SQLite with the following tables:
 - `filer_id` (Foreign Key)
 - `reason` (Text)
 - `evidence` (Text, nullable)
+- `counter_proof` (Text, nullable) - NEW: Counter evidence URL
 - `status` (pending/resolved)
 - `created_at` (Timestamp)
 - `resolved_at` (Timestamp, nullable)
+
+### Dispute Votes
+- `id` (Primary Key)
+- `dispute_id` (Foreign Key)
+- `voter_id` (Foreign Key)
+- `vote` (creator/opponent)
+- `created_at` (Timestamp)
 
 ## Usage Examples
 
@@ -335,6 +395,33 @@ Submit proof of winning wager #1 with the match ID.
 /wager dispute id:1 reason:Opponent cheated, have video proof
 ```
 File a dispute for wager #1.
+
+### Dispute Resolution Process
+
+**1. File Dispute:**
+```
+/wager dispute id:1 reason:Match result is incorrect
+```
+
+**2. Submit Counter-Proof (Opposing Party):**
+```
+/dispute counter-proof dispute_id:1 proof_url:https://imgur.com/proof123
+```
+
+**3. Community Voting (Optional):**
+```
+/dispute vote dispute_id:1 side:creator
+```
+- Non-participants can vote on disputes
+- Helps moderators make informed decisions
+
+**4. Moderator Resolution:**
+```
+/dispute resolve dispute_id:1 winner:creator reason:Original proof clearly shows victory
+```
+- Moderators with "Manage Messages" permission can resolve disputes
+- Options: Award to creator, award to opponent, or cancel wager
+- Both parties are notified of the decision
 
 ## Platform Fee
 

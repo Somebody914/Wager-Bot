@@ -131,6 +131,40 @@ function initializeDatabase() {
         // Column already exists
     }
 
+    // Add verification-related columns to wagers table
+    try {
+        db.exec(`ALTER TABLE wagers ADD COLUMN proof_url TEXT`);
+    } catch (e) {
+        // Column already exists
+    }
+
+    try {
+        db.exec(`ALTER TABLE wagers ADD COLUMN match_type TEXT DEFAULT 'ranked'`);
+    } catch (e) {
+        // Column already exists
+    }
+
+    // Add counter_proof column to disputes table
+    try {
+        db.exec(`ALTER TABLE disputes ADD COLUMN counter_proof TEXT`);
+    } catch (e) {
+        // Column already exists
+    }
+
+    // Dispute votes table (for community voting system)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS dispute_votes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dispute_id INTEGER NOT NULL,
+            voter_id TEXT NOT NULL,
+            vote TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (dispute_id) REFERENCES disputes(id),
+            FOREIGN KEY (voter_id) REFERENCES users(discord_id),
+            UNIQUE(dispute_id, voter_id)
+        )
+    `);
+
     console.log('✅ Database initialized successfully');
 }
 
@@ -188,14 +222,14 @@ const linkedAccountOps = {
 
 // Wager operations
 const wagerOps = {
-    create(creatorId, opponentId, game, amount, teamSize = 1, wagerType = 'solo', creatorTeamId = null, opponentTeamId = null) {
+    create(creatorId, opponentId, game, amount, teamSize = 1, wagerType = 'solo', creatorTeamId = null, opponentTeamId = null, matchType = 'ranked') {
         const stmt = db.prepare(`
             INSERT INTO wagers 
-            (creator_id, opponent_id, game, amount, status, team_size, wager_type, creator_team_id, opponent_team_id) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (creator_id, opponent_id, game, amount, status, team_size, wager_type, creator_team_id, opponent_team_id, match_type) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
         const status = opponentId ? 'accepted' : 'open';
-        const result = stmt.run(creatorId, opponentId, game, amount, status, teamSize, wagerType, creatorTeamId, opponentTeamId);
+        const result = stmt.run(creatorId, opponentId, game, amount, status, teamSize, wagerType, creatorTeamId, opponentTeamId, matchType);
         return result.lastInsertRowid;
     },
 
@@ -209,9 +243,9 @@ const wagerOps = {
         return stmt.run(opponentId, 'accepted', wagerId, 'open');
     },
 
-    submit(wagerId, matchId, winnerId) {
-        const stmt = db.prepare('UPDATE wagers SET match_id = ?, winner_id = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
-        return stmt.run(matchId, winnerId, 'pending_verification', wagerId);
+    submit(wagerId, matchId, winnerId, proofUrl = null) {
+        const stmt = db.prepare('UPDATE wagers SET match_id = ?, winner_id = ?, proof_url = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+        return stmt.run(matchId, winnerId, proofUrl, 'pending_verification', wagerId);
     },
 
     complete(wagerId, winnerId) {
@@ -266,6 +300,35 @@ const disputeOps = {
     resolve(disputeId, status) {
         const stmt = db.prepare('UPDATE disputes SET status = ?, resolved_at = CURRENT_TIMESTAMP WHERE id = ?');
         return stmt.run(status, disputeId);
+    },
+
+    addCounterProof(disputeId, counterProof) {
+        const stmt = db.prepare('UPDATE disputes SET counter_proof = ? WHERE id = ?');
+        return stmt.run(counterProof, disputeId);
+    }
+};
+
+// Dispute vote operations
+const disputeVoteOps = {
+    addVote(disputeId, voterId, vote) {
+        const stmt = db.prepare('INSERT OR REPLACE INTO dispute_votes (dispute_id, voter_id, vote) VALUES (?, ?, ?)');
+        return stmt.run(disputeId, voterId, vote);
+    },
+
+    getVotes(disputeId) {
+        const stmt = db.prepare('SELECT * FROM dispute_votes WHERE dispute_id = ?');
+        return stmt.all(disputeId);
+    },
+
+    getVoteCounts(disputeId) {
+        const stmt = db.prepare(`
+            SELECT 
+                SUM(CASE WHEN vote = 'creator' THEN 1 ELSE 0 END) as creator_votes,
+                SUM(CASE WHEN vote = 'opponent' THEN 1 ELSE 0 END) as opponent_votes
+            FROM dispute_votes 
+            WHERE dispute_id = ?
+        `);
+        return stmt.get(disputeId);
     }
 };
 
@@ -402,6 +465,7 @@ module.exports = {
     linkedAccountOps,
     wagerOps,
     disputeOps,
+    disputeVoteOps,
     statsOps,
     teamOps,
     participantOps,
