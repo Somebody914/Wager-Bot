@@ -1,54 +1,83 @@
 # Wager Bot
 
-A comprehensive Discord bot for managing crypto gaming wagers on the Wager platform. Create, accept, and manage wagers across multiple games including Valorant, League of Legends, CS2, Rocket League, Fortnite, and Apex Legends.
+A comprehensive Discord bot for managing crypto gaming wagers on the Wager platform. Create, accept, and manage wagers across multiple games including Valorant, League of Legends, CS2, Rocket League, Fortnite, Apex Legends, and Rainbow Six Siege.
 
 ## Features
 
 ### 🎮 Core Functionality
 - **Wallet Verification**: Link Discord accounts to Ethereum wallets
-- **Gaming Account Linking**: Connect accounts from supported games
-- **Wager Creation**: Create direct challenges or open wagers
+- **Gaming Account Linking**: Connect and verify accounts from supported games with real API verification
+- **Solo & Team Wagers**: Create 1v1 wagers or team-based matches (2v2, 3v3, 5v5 depending on game)
+- **LFT System**: Looking For Teammates - join team wagers as individual players
 - **Match Verification**: Submit proof and track match results
 - **Dispute System**: File and resolve disputes with moderators
 - **Statistics Tracking**: View wins, losses, and earnings
 - **Leaderboards**: See top players overall or by game
+- **Team Management**: Create, manage, and organize teams
 
 ### 🤖 Automated Systems
-- Real-time wager alerts in dedicated channels
+- Real-time wager alerts in dedicated channels with interactive buttons
 - Match result notifications
 - Dispute alerts for moderators
 - DM notifications for all participants
 - Automatic "Verified" role assignment
+- Channel moderation for wager-alerts and disputes channels
 
 ### 💎 Additional Features
 - 3% platform fee calculation
 - Escrow balance tracking
 - Rich embeds for all messages
 - Interactive buttons for quick actions
-- Support for 6 major games
+- Support for 7 major games
+- Real game account verification via official APIs
+- Team roster management
+- Multi-player wager support
+
+### 🔒 Security & Verification
+- **Real Account Verification**: Verify game accounts using official APIs
+  - Riot Games API (Valorant & League of Legends)
+  - Steam API (CS2)
+  - Tracker.gg API (Rocket League, R6, Fortnite, Apex Legends)
+- **Channel Moderation**: Auto-delete non-bot messages in dedicated channels
+- **Warning System**: Automatic DM warnings for users who post in moderated channels
 
 ## Supported Games
 
-- Valorant
-- League of Legends
-- CS2 (Counter-Strike 2)
-- Rocket League
-- Fortnite
-- Apex Legends
+- **Valorant** (5v5) - Riot ID verification
+- **League of Legends** (5v5) - Riot ID verification
+- **CS2 (Counter-Strike 2)** (5v5) - Steam account verification
+- **Rocket League** (1v1, 2v2, 3v3) - Tracker.gg verification
+- **Fortnite** (1v1, 2v2, 4v4) - Tracker.gg verification
+- **Apex Legends** (3v3) - Tracker.gg verification
+- **Rainbow Six Siege** (5v5) - Tracker.gg verification
 
 ## Commands
 
 ### Account Management
 - `/verify <wallet>` - Link your Discord account to an ETH wallet address
-- `/link <game> <username>` - Link your gaming account
+- `/link <game> <username>` - Link and verify your gaming account (format varies by game)
+  - Valorant/LoL: Use Riot ID format `name#tag` (e.g., `Player#NA1`)
+  - CS2: Use Steam ID64 or custom URL
+  - Other games: Use in-game username
 - `/balance` - Check your escrow balance
 
 ### Wager Commands
-- `/wager create <game> <amount> [opponent]` - Create a new wager
+- `/wager create <game> <amount> [opponent] [team_size] [team_id]` - Create a new wager
+  - Solo: `/wager create game:Valorant amount:0.1`
+  - Team (with existing team): `/wager create game:CS2 amount:0.2 team_size:5 team_id:1`
+  - LFT (Looking For Teammates): `/wager create game:Rocket_League amount:0.15 team_size:3`
 - `/wager accept <id>` - Accept an open challenge
+- `/wager lft-join <id> <side>` - Join an LFT wager (creator or opponent side)
 - `/wager status <id>` - Check wager details and status
 - `/wager submit <id> <match_id>` - Submit win proof with match ID
 - `/wager dispute <id> <reason>` - File a dispute on a wager
+
+### Team Commands
+- `/team create <name> <game>` - Create a new team
+- `/team invite <team_id> <@user>` - Invite a user to your team (captain only)
+- `/team leave <team_id>` - Leave a team
+- `/team roster [team_id]` - View team roster or list your teams
+- `/team disband <team_id>` - Disband your team (captain only)
 
 ### Statistics
 - `/stats [@user]` - View user statistics
@@ -121,15 +150,27 @@ cp .env.example .env
 
 2. Edit `.env` and fill in your values:
 ```env
+# Discord Bot Configuration
 DISCORD_TOKEN=your_bot_token_here
 CLIENT_ID=your_application_client_id_here
 GUILD_ID=your_server_id_here
 
+# Channel IDs
 WAGER_ALERTS_CHANNEL=channel_id_for_wager_alerts
 MATCH_RESULTS_CHANNEL=channel_id_for_match_results
 DISPUTES_CHANNEL=channel_id_for_disputes
 
+# Channel Moderation
+MODERATION_ENABLED=true
+OPEN_CHALLENGES_CHANNEL=channel_id_for_wager_alerts
+
+# Role IDs
 VERIFIED_ROLE_ID=role_id_for_verified_users
+
+# Game API Keys (for account verification)
+RIOT_API_KEY=your_riot_api_key
+STEAM_API_KEY=your_steam_api_key
+TRACKER_API_KEY=your_tracker_gg_api_key
 ```
 
 **Required Variables:**
@@ -140,6 +181,18 @@ VERIFIED_ROLE_ID=role_id_for_verified_users
 - `MATCH_RESULTS_CHANNEL` - Channel ID where match results will be posted
 - `DISPUTES_CHANNEL` - Channel ID where disputes will be posted
 - `VERIFIED_ROLE_ID` - Role ID for verified users
+
+**Optional Variables (for enhanced features):**
+- `MODERATION_ENABLED` - Enable/disable channel moderation (default: false)
+- `OPEN_CHALLENGES_CHANNEL` - Alias for WAGER_ALERTS_CHANNEL used by moderation
+- `RIOT_API_KEY` - For verifying Valorant and League of Legends accounts
+- `STEAM_API_KEY` - For verifying CS2/Steam accounts
+- `TRACKER_API_KEY` - For verifying Rocket League, R6, Fortnite, and Apex accounts
+
+**How to get API keys:**
+- **Riot API**: Visit [Riot Developer Portal](https://developer.riotgames.com/)
+- **Steam API**: Visit [Steam Web API Key](https://steamcommunity.com/dev/apikey)
+- **Tracker.gg API**: Visit [Tracker.gg](https://tracker.gg/developers)
 
 ### 6. Deploy Slash Commands
 

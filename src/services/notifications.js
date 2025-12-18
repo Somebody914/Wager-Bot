@@ -18,20 +18,46 @@ async function sendWagerAlert(client, wager) {
         
         // Add buttons for open challenges
         if (wager.status === 'open') {
-            const row = new ActionRowBuilder()
-                .addComponents(
-                    new ButtonBuilder()
-                        .setCustomId(`accept_wager_${wager.id}`)
-                        .setLabel('Accept Challenge')
-                        .setStyle(ButtonStyle.Success)
-                        .setEmoji('⚔️'),
-                    new ButtonBuilder()
-                        .setCustomId(`view_wager_${wager.id}`)
-                        .setLabel('View Details')
-                        .setStyle(ButtonStyle.Primary)
-                        .setEmoji('🔍')
-                );
-            components.push(row);
+            const wagerType = wager.wager_type || 'solo';
+            
+            if (wagerType === 'lft') {
+                // LFT wager buttons
+                const row = new ActionRowBuilder()
+                    .addComponents(
+                        new ButtonBuilder()
+                            .setCustomId(`lft_join_creator_${wager.id}`)
+                            .setLabel('Join Creator Team')
+                            .setStyle(ButtonStyle.Success)
+                            .setEmoji('👥'),
+                        new ButtonBuilder()
+                            .setCustomId(`lft_join_opponent_${wager.id}`)
+                            .setLabel('Join Opponent Team')
+                            .setStyle(ButtonStyle.Danger)
+                            .setEmoji('👥'),
+                        new ButtonBuilder()
+                            .setCustomId(`view_wager_${wager.id}`)
+                            .setLabel('View Details')
+                            .setStyle(ButtonStyle.Primary)
+                            .setEmoji('🔍')
+                    );
+                components.push(row);
+            } else {
+                // Regular wager buttons
+                const row = new ActionRowBuilder()
+                    .addComponents(
+                        new ButtonBuilder()
+                            .setCustomId(`accept_wager_${wager.id}`)
+                            .setLabel('Accept Challenge')
+                            .setStyle(ButtonStyle.Success)
+                            .setEmoji('⚔️'),
+                        new ButtonBuilder()
+                            .setCustomId(`view_wager_${wager.id}`)
+                            .setLabel('View Details')
+                            .setStyle(ButtonStyle.Primary)
+                            .setEmoji('🔍')
+                    );
+                components.push(row);
+            }
         }
 
         await channel.send({ 
