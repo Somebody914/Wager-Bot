@@ -309,6 +309,11 @@ const wagerOps = {
     getUserWagers(discordId) {
         const stmt = db.prepare('SELECT * FROM wagers WHERE creator_id = ? OR opponent_id = ? ORDER BY created_at DESC');
         return stmt.all(discordId, discordId);
+    },
+
+    updateStatus(wagerId, status) {
+        const stmt = db.prepare('UPDATE wagers SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+        return stmt.run(status, wagerId);
     }
 };
 

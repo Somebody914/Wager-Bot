@@ -112,8 +112,7 @@ async function handleDeposit(interaction) {
             message += `Use \`/wager submit ${wagerId}\` to submit your results after the match.`;
             
             // Update wager status to in_progress
-            const updateStmt = db.db.prepare('UPDATE wagers SET status = ? WHERE id = ?');
-            updateStmt.run('in_progress', wagerId);
+            wagerOps.updateStatus(wagerId, 'in_progress');
         } else {
             message += `⏳ Waiting for ${verification.side === 'creator' ? 'opponent' : 'creator'} to deposit.`;
         }

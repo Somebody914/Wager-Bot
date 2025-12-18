@@ -15,6 +15,23 @@ class EscrowService {
      * @returns {Object} Created escrow account with unique address
      */
     createEscrowAccount(wagerId) {
+        // Validate that wager exists
+        const wager = this.db.wagerOps.get(wagerId);
+        if (!wager) {
+            throw new Error('Wager not found');
+        }
+
+        // Check if escrow account already exists
+        const existingAccount = this.db.escrowOps.getAccount(wagerId);
+        if (existingAccount) {
+            return {
+                wagerId,
+                escrowAddress: existingAccount.escrow_address,
+                status: existingAccount.status,
+                createdAt: existingAccount.created_at
+            };
+        }
+
         // Generate a unique escrow address for this wager
         // In production, this would integrate with actual wallet generation
         const escrowAddress = this.generateEscrowAddress(wagerId);
@@ -291,10 +308,14 @@ class EscrowService {
      * @returns {string} Unique escrow address
      */
     generateEscrowAddress(wagerId) {
-        // In production, this would generate an actual wallet address
-        // For now, create a deterministic address based on wager ID
+        // In production, this would generate an actual wallet address using
+        // proper cryptographic key generation (e.g., ethers.js Wallet.createRandom())
+        
+        // For development/testing, create a deterministic address based on wager ID
+        // and a master seed (would be stored securely in production)
+        const masterSeed = process.env.ESCROW_MASTER_WALLET || 'development-seed-do-not-use-in-production';
         const hash = crypto.createHash('sha256')
-            .update(`wager-${wagerId}-${Date.now()}`)
+            .update(`${masterSeed}-wager-${wagerId}`)
             .digest('hex');
         
         return `0x${hash.substring(0, 40)}`;
