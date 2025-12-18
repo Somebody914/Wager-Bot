@@ -79,27 +79,35 @@ const COLORS = {
 function isValidProofUrl(url) {
     if (!url) return false;
     
-    // Discord CDN attachments
-    if (url.includes('cdn.discordapp.com') || url.includes('media.discordapp.net')) {
-        return true;
+    try {
+        const urlObj = new URL(url);
+        const hostname = urlObj.hostname.toLowerCase();
+        
+        // Discord CDN attachments - must be exact hostname match
+        if (hostname === 'cdn.discordapp.com' || hostname === 'media.discordapp.net') {
+            return true;
+        }
+        
+        // Imgur - exact hostname match
+        if (hostname === 'imgur.com' || hostname === 'i.imgur.com') {
+            return true;
+        }
+        
+        // YouTube - exact hostname match
+        if (hostname === 'youtube.com' || hostname === 'www.youtube.com' || hostname === 'youtu.be') {
+            return true;
+        }
+        
+        // Streamable - exact hostname match
+        if (hostname === 'streamable.com' || hostname === 'www.streamable.com') {
+            return true;
+        }
+        
+        return false;
+    } catch (error) {
+        // Invalid URL format
+        return false;
     }
-    
-    // Imgur
-    if (url.match(/^https?:\/\/(i\.)?imgur\.com\//)) {
-        return true;
-    }
-    
-    // YouTube
-    if (url.match(/^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//)) {
-        return true;
-    }
-    
-    // Streamable
-    if (url.match(/^https?:\/\/(www\.)?streamable\.com\//)) {
-        return true;
-    }
-    
-    return false;
 }
 
 // Payout calculation helper
