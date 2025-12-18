@@ -5,7 +5,8 @@ const GAMES = {
     CS2: 'CS2',
     ROCKET_LEAGUE: 'Rocket League',
     FORTNITE: 'Fortnite',
-    APEX: 'Apex Legends'
+    APEX: 'Apex Legends',
+    R6: 'Rainbow Six Siege'
 };
 
 const GAME_CHOICES = [
@@ -14,8 +15,27 @@ const GAME_CHOICES = [
     { name: 'CS2 (Counter-Strike 2)', value: 'cs2' },
     { name: 'Rocket League', value: 'rocket_league' },
     { name: 'Fortnite', value: 'fortnite' },
-    { name: 'Apex Legends', value: 'apex' }
+    { name: 'Apex Legends', value: 'apex' },
+    { name: 'Rainbow Six Siege', value: 'r6' }
 ];
+
+// Team sizes per game
+const TEAM_SIZES = {
+    valorant: [5],
+    lol: [5],
+    cs2: [5],
+    rocket_league: [1, 2, 3],
+    fortnite: [1, 2, 4],
+    apex: [3],
+    r6: [5]
+};
+
+// Wager types
+const WAGER_TYPES = {
+    SOLO: 'solo',
+    TEAM: 'team',
+    LFT: 'lft' // Looking for teammates
+};
 
 // Wager statuses
 const WAGER_STATUS = {
@@ -43,6 +63,8 @@ const COLORS = {
 module.exports = {
     GAMES,
     GAME_CHOICES,
+    TEAM_SIZES,
+    WAGER_TYPES,
     WAGER_STATUS,
     PLATFORM_FEE,
     COLORS

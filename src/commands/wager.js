@@ -1,7 +1,7 @@
 const { SlashCommandBuilder } = require('discord.js');
-const { userOps, wagerOps, disputeOps } = require('../services/database');
+const { userOps, wagerOps, disputeOps, teamOps, participantOps } = require('../services/database');
 const { createWagerEmbed, createErrorEmbed, createSuccessEmbed } = require('../utils/embeds');
-const { GAME_CHOICES, PLATFORM_FEE } = require('../utils/constants');
+const { GAME_CHOICES, PLATFORM_FEE, TEAM_SIZES, WAGER_TYPES } = require('../utils/constants');
 const { sendWagerAlert, notifyWagerAccepted, notifyWagerSubmitted, notifyWagerCompleted, notifyDispute, sendMatchResult, sendDisputeAlert } = require('../services/notifications');
 
 module.exports = {
@@ -25,7 +25,18 @@ module.exports = {
                 .addUserOption(option =>
                     option.setName('opponent')
                         .setDescription('Challenge a specific user (leave empty for open challenge)')
-                        .setRequired(false)))
+                        .setRequired(false))
+                .addIntegerOption(option =>
+                    option.setName('team_size')
+                        .setDescription('Team size (1 for solo, or game-specific sizes)')
+                        .setRequired(false)
+                        .setMinValue(1)
+                        .setMaxValue(5))
+                .addIntegerOption(option =>
+                    option.setName('team_id')
+                        .setDescription('Your team ID (for team wagers)')
+                        .setRequired(false)
+                        .setMinValue(1)))
         .addSubcommand(subcommand =>
             subcommand
                 .setName('accept')
@@ -69,7 +80,24 @@ module.exports = {
                 .addStringOption(option =>
                     option.setName('reason')
                         .setDescription('Reason for the dispute')
-                        .setRequired(true))),
+                        .setRequired(true)))
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('lft-join')
+                .setDescription('Join an LFT (Looking For Teammates) wager')
+                .addIntegerOption(option =>
+                    option.setName('id')
+                        .setDescription('Wager ID')
+                        .setRequired(true)
+                        .setMinValue(1))
+                .addStringOption(option =>
+                    option.setName('side')
+                        .setDescription('Which side to join')
+                        .setRequired(true)
+                        .addChoices(
+                            { name: 'Creator Side', value: 'creator' },
+                            { name: 'Opponent Side', value: 'opponent' }
+                        ))),
 
     async execute(interaction) {
         const subcommand = interaction.options.getSubcommand();
@@ -91,6 +119,9 @@ module.exports = {
                 case 'dispute':
                     await handleDispute(interaction);
                     break;
+                case 'lft-join':
+                    await handleLftJoin(interaction);
+                    break;
             }
         } catch (error) {
             console.error(`Error in wager ${subcommand}:`, error);
@@ -104,12 +135,59 @@ async function handleCreate(interaction) {
     const game = interaction.options.getString('game');
     const amount = interaction.options.getNumber('amount');
     const opponent = interaction.options.getUser('opponent');
+    const teamSize = interaction.options.getInteger('team_size') || 1;
+    const teamId = interaction.options.getInteger('team_id');
 
     // Check if user is verified
     const user = userOps.get(interaction.user.id);
     if (!user || !user.verified) {
         const embed = createErrorEmbed('You must verify your wallet first using `/verify <wallet>`.');
         return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    // Validate team size for the game
+    const validTeamSizes = TEAM_SIZES[game] || [1];
+    if (!validTeamSizes.includes(teamSize)) {
+        const embed = createErrorEmbed(
+            `Invalid team size for ${game}.\n\n` +
+            `Valid team sizes: ${validTeamSizes.join(', ')}`
+        );
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    // Validate team if provided
+    let team = null;
+    if (teamId) {
+        team = teamOps.get(teamId);
+        if (!team) {
+            const embed = createErrorEmbed('Team not found.');
+            return interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+
+        // Check if user is captain or member
+        if (team.captain_id !== interaction.user.id) {
+            const members = teamOps.getMembers(teamId);
+            if (!members.some(m => m.discord_id === interaction.user.id)) {
+                const embed = createErrorEmbed('You are not a member of this team.');
+                return interaction.reply({ embeds: [embed], ephemeral: true });
+            }
+        }
+
+        // Check if team game matches wager game
+        if (team.game !== game) {
+            const embed = createErrorEmbed(`This team is for ${team.game}, not ${game}.`);
+            return interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+
+        // Check if team size matches
+        const currentTeamSize = teamOps.getMemberCount(teamId);
+        if (currentTeamSize !== teamSize) {
+            const embed = createErrorEmbed(
+                `Team size mismatch.\n\n` +
+                `Your team has ${currentTeamSize} members, but you specified team size ${teamSize}.`
+            );
+            return interaction.reply({ embeds: [embed], ephemeral: true });
+        }
     }
 
     // Validate opponent
@@ -126,12 +204,22 @@ async function handleCreate(interaction) {
         }
     }
 
+    // Determine wager type
+    let wagerType = WAGER_TYPES.SOLO;
+    if (teamSize > 1) {
+        wagerType = teamId ? WAGER_TYPES.TEAM : WAGER_TYPES.LFT;
+    }
+
     // Create wager
     const wagerId = wagerOps.create(
         interaction.user.id,
         opponent ? opponent.id : null,
         game,
-        amount
+        amount,
+        teamSize,
+        wagerType,
+        teamId,
+        null
     );
 
     const wager = wagerOps.get(wagerId);
@@ -139,16 +227,33 @@ async function handleCreate(interaction) {
     const fee = (amount * PLATFORM_FEE).toFixed(4);
     const payout = (amount * 2 * (1 - PLATFORM_FEE)).toFixed(4);
 
-    const embed = createSuccessEmbed(
-        `✅ Wager created successfully!\n\n` +
+    let message = `✅ Wager created successfully!\n\n` +
         `**Wager ID:** ${wagerId}\n` +
         `**Game:** ${gameName}\n` +
         `**Amount:** ${amount} ETH\n` +
         `**Platform Fee:** ${fee} ETH (3%)\n` +
-        `**Winner Payout:** ${payout} ETH\n` +
-        `**Opponent:** ${opponent ? opponent.toString() : 'Open Challenge'}\n\n` +
-        (opponent ? 'Your opponent has been notified.' : 'Other players can accept this challenge using `/wager accept ' + wagerId + '`.')
-    );
+        `**Winner Payout:** ${payout} ETH\n`;
+
+    if (teamSize > 1) {
+        message += `**Team Size:** ${teamSize}v${teamSize}\n`;
+        message += `**Type:** ${wagerType === WAGER_TYPES.TEAM ? 'Team Wager' : 'LFT (Looking For Teammates)'}\n`;
+        if (team) {
+            message += `**Your Team:** ${team.name}\n`;
+        }
+    }
+
+    message += `**Opponent:** ${opponent ? opponent.toString() : 'Open Challenge'}\n\n`;
+
+    if (opponent) {
+        message += 'Your opponent has been notified.';
+    } else if (wagerType === WAGER_TYPES.LFT) {
+        message += `Players can join your team using \`/wager lft-join ${wagerId} creator\`.\n`;
+        message += `Opponents can join using \`/wager lft-join ${wagerId} opponent\`.`;
+    } else {
+        message += `Other players can accept this challenge using \`/wager accept ${wagerId}\`.`;
+    }
+
+    const embed = createSuccessEmbed(message);
 
     await interaction.reply({ embeds: [embed] });
 
@@ -329,4 +434,116 @@ async function handleDispute(interaction) {
     const dispute = disputeOps.get(disputeId);
     await sendDisputeAlert(interaction.client, wager, dispute);
     await notifyDispute(interaction.client, wager, dispute);
+}
+
+async function handleLftJoin(interaction) {
+    const wagerId = interaction.options.getInteger('id');
+    const side = interaction.options.getString('side');
+
+    // Check if user is verified
+    const user = userOps.get(interaction.user.id);
+    if (!user || !user.verified) {
+        const embed = createErrorEmbed('You must verify your wallet first using `/verify <wallet>`.');
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    // Get wager
+    const wager = wagerOps.get(wagerId);
+    if (!wager) {
+        const embed = createErrorEmbed('Wager not found.');
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    // Check if wager is LFT type
+    if (wager.wager_type !== WAGER_TYPES.LFT) {
+        const embed = createErrorEmbed('This wager is not an LFT (Looking For Teammates) wager.');
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    // Check if wager is still open
+    if (wager.status !== 'open') {
+        const embed = createErrorEmbed('This wager is no longer accepting players.');
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    // Check if user is already in the wager
+    if (wager.creator_id === interaction.user.id) {
+        const embed = createErrorEmbed('You are the creator of this wager!');
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    const existingParticipants = participantOps.getByWager(wagerId);
+    if (existingParticipants.some(p => p.discord_id === interaction.user.id)) {
+        const embed = createErrorEmbed('You are already in this wager!');
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    // Check if the side is full
+    const sideCount = participantOps.getCount(wagerId, side);
+    const maxPerSide = wager.team_size;
+
+    // For creator side, we need to account for the creator themselves
+    const currentSideCount = side === 'creator' ? sideCount + 1 : sideCount;
+
+    if (currentSideCount >= maxPerSide) {
+        const embed = createErrorEmbed(`The ${side} side is already full (${maxPerSide}/${maxPerSide}).`);
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    // Add participant
+    participantOps.add(wagerId, interaction.user.id, side);
+
+    const newSideCount = currentSideCount + 1;
+    const gameName = GAME_CHOICES.find(g => g.value === wager.game)?.name || wager.game;
+
+    const embed = createSuccessEmbed(
+        `✅ Successfully joined the wager!\n\n` +
+        `**Wager ID:** ${wagerId}\n` +
+        `**Game:** ${gameName}\n` +
+        `**Side:** ${side === 'creator' ? 'Creator' : 'Opponent'}\n` +
+        `**Team Size:** ${newSideCount}/${maxPerSide}\n\n` +
+        `${newSideCount === maxPerSide ? '✅ Your side is now full!' : `Waiting for ${maxPerSide - newSideCount} more player(s) on your side.`}`
+    );
+
+    await interaction.reply({ embeds: [embed] });
+
+    // Check if both sides are full
+    const creatorSideCount = participantOps.getCount(wagerId, 'creator') + 1; // +1 for creator
+    const opponentSideCount = participantOps.getCount(wagerId, 'opponent');
+
+    if (creatorSideCount === maxPerSide && opponentSideCount === maxPerSide) {
+        // Both sides are full, accept the wager
+        // Set the first opponent participant as the opponent
+        const opponentParticipants = participantOps.getByWager(wagerId, 'opponent');
+        if (opponentParticipants.length > 0) {
+            wagerOps.accept(wagerId, opponentParticipants[0].discord_id);
+            
+            // Notify all participants
+            const allParticipants = participantOps.getByWager(wagerId);
+            const updatedWager = wagerOps.get(wagerId);
+            
+            for (const participant of allParticipants) {
+                try {
+                    const user = await interaction.client.users.fetch(participant.discord_id);
+                    await user.send(
+                        `✅ Wager #${wagerId} is now full and ready to start!\n\n` +
+                        `All ${maxPerSide}v${maxPerSide} slots have been filled. Good luck!`
+                    );
+                } catch (error) {
+                    console.error('Error notifying participant:', error);
+                }
+            }
+
+            // Also notify the creator
+            try {
+                const creator = await interaction.client.users.fetch(wager.creator_id);
+                await creator.send(
+                    `✅ Your wager #${wagerId} is now full and ready to start!\n\n` +
+                    `All ${maxPerSide}v${maxPerSide} slots have been filled. Good luck!`
+                );
+            } catch (error) {
+                console.error('Error notifying creator:', error);
+            }
+        }
+    }
 }

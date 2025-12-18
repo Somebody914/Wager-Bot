@@ -5,8 +5,11 @@ function createWagerEmbed(wager, creator, opponent = null) {
     const fee = (wager.amount * PLATFORM_FEE).toFixed(4);
     const payout = (wager.amount * 2 * (1 - PLATFORM_FEE)).toFixed(4);
 
+    const teamSize = wager.team_size || 1;
+    const wagerType = wager.wager_type || 'solo';
+
     const embed = new EmbedBuilder()
-        .setTitle(`🎮 ${wager.game} Wager #${wager.id}`)
+        .setTitle(`🎮 ${wager.game} Wager #${wager.id}${teamSize > 1 ? ` (${teamSize}v${teamSize})` : ''}`)
         .setColor(COLORS.PRIMARY)
         .addFields(
             { name: 'Creator', value: `<@${wager.creator_id}>`, inline: true },
@@ -15,8 +18,14 @@ function createWagerEmbed(wager, creator, opponent = null) {
             { name: 'Platform Fee', value: `${fee} ETH (3%)`, inline: true },
             { name: 'Winner Payout', value: `${payout} ETH`, inline: true },
             { name: 'Status', value: wager.status.toUpperCase(), inline: true }
-        )
-        .setTimestamp(new Date(wager.created_at))
+        );
+
+    if (teamSize > 1) {
+        const typeDisplay = wagerType === 'lft' ? '🔍 LFT (Looking For Teammates)' : '👥 Team Wager';
+        embed.addFields({ name: 'Type', value: typeDisplay, inline: true });
+    }
+
+    embed.setTimestamp(new Date(wager.created_at))
         .setFooter({ text: `Wager ID: ${wager.id}` });
 
     return embed;
