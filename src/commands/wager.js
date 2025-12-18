@@ -1,7 +1,7 @@
 const { SlashCommandBuilder } = require('discord.js');
-const { userOps, wagerOps, disputeOps, teamOps, participantOps } = require('../services/database');
+const { userOps, wagerOps, disputeOps, teamOps, participantOps, disputeVoteOps } = require('../services/database');
 const { createWagerEmbed, createErrorEmbed, createSuccessEmbed } = require('../utils/embeds');
-const { GAME_CHOICES, PLATFORM_FEE, TEAM_SIZES, WAGER_TYPES } = require('../utils/constants');
+const { GAME_CHOICES, PLATFORM_FEE, TEAM_SIZES, WAGER_TYPES, MATCH_TYPE_CHOICES, isValidProofUrl } = require('../utils/constants');
 const { sendWagerAlert, notifyWagerAccepted, notifyWagerSubmitted, notifyWagerCompleted, notifyDispute, sendMatchResult, sendDisputeAlert } = require('../services/notifications');
 
 module.exports = {
@@ -36,7 +36,12 @@ module.exports = {
                     option.setName('team_id')
                         .setDescription('Your team ID (for team wagers)')
                         .setRequired(false)
-                        .setMinValue(1)))
+                        .setMinValue(1))
+                .addStringOption(option =>
+                    option.setName('match_type')
+                        .setDescription('Type of match for verification')
+                        .setRequired(false)
+                        .addChoices(...MATCH_TYPE_CHOICES)))
         .addSubcommand(subcommand =>
             subcommand
                 .setName('accept')
@@ -58,7 +63,7 @@ module.exports = {
         .addSubcommand(subcommand =>
             subcommand
                 .setName('submit')
-                .setDescription('Submit win proof with match ID')
+                .setDescription('Submit win proof')
                 .addIntegerOption(option =>
                     option.setName('id')
                         .setDescription('Wager ID')
@@ -66,8 +71,12 @@ module.exports = {
                         .setMinValue(1))
                 .addStringOption(option =>
                     option.setName('match_id')
-                        .setDescription('Match ID for verification')
-                        .setRequired(true)))
+                        .setDescription('Match ID for API verification (ranked/competitive only)')
+                        .setRequired(false))
+                .addStringOption(option =>
+                    option.setName('proof_url')
+                        .setDescription('Screenshot/video URL (Discord/Imgur/YouTube for custom/creative matches)')
+                        .setRequired(false)))
         .addSubcommand(subcommand =>
             subcommand
                 .setName('dispute')
@@ -137,6 +146,7 @@ async function handleCreate(interaction) {
     const opponent = interaction.options.getUser('opponent');
     const teamSize = interaction.options.getInteger('team_size') || 1;
     const teamId = interaction.options.getInteger('team_id');
+    const matchType = interaction.options.getString('match_type') || 'ranked';
 
     // Check if user is verified
     const user = userOps.get(interaction.user.id);
@@ -219,7 +229,8 @@ async function handleCreate(interaction) {
         teamSize,
         wagerType,
         teamId,
-        null
+        null,
+        matchType
     );
 
     const wager = wagerOps.get(wagerId);
@@ -227,12 +238,16 @@ async function handleCreate(interaction) {
     const fee = (amount * PLATFORM_FEE).toFixed(4);
     const payout = (amount * 2 * (1 - PLATFORM_FEE)).toFixed(4);
 
+    // Get match type display name
+    const matchTypeDisplay = MATCH_TYPE_CHOICES.find(mt => mt.value === matchType)?.name || matchType;
+
     let message = `✅ Wager created successfully!\n\n` +
         `**Wager ID:** ${wagerId}\n` +
         `**Game:** ${gameName}\n` +
         `**Amount:** ${amount} ETH\n` +
         `**Platform Fee:** ${fee} ETH (3%)\n` +
-        `**Winner Payout:** ${payout} ETH\n`;
+        `**Winner Payout:** ${payout} ETH\n` +
+        `**Match Type:** ${matchTypeDisplay}\n`;
 
     if (teamSize > 1) {
         message += `**Team Size:** ${teamSize}v${teamSize}\n`;
@@ -243,6 +258,11 @@ async function handleCreate(interaction) {
     }
 
     message += `**Opponent:** ${opponent ? opponent.toString() : 'Open Challenge'}\n\n`;
+
+    // Add verification requirement info
+    if (matchType === 'custom' || matchType === 'creative') {
+        message += `⚠️ **Proof Required:** Upload screenshot/video when submitting results.\n`;
+    }
 
     if (opponent) {
         message += 'Your opponent has been notified.';
@@ -338,6 +358,7 @@ async function handleStatus(interaction) {
 async function handleSubmit(interaction) {
     const wagerId = interaction.options.getInteger('id');
     const matchId = interaction.options.getString('match_id');
+    const proofUrl = interaction.options.getString('proof_url');
 
     // Get wager
     const wager = wagerOps.get(wagerId);
@@ -358,15 +379,56 @@ async function handleSubmit(interaction) {
         return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
-    // Submit win
-    wagerOps.submit(wagerId, matchId, interaction.user.id);
+    // Validate submission based on match type
+    const matchType = wager.match_type || 'ranked';
+    
+    if (matchType === 'custom' || matchType === 'creative') {
+        // Custom/creative matches require proof URL
+        if (!proofUrl) {
+            const embed = createErrorEmbed(
+                'Proof required for custom/creative matches!\n\n' +
+                'Please provide a proof_url (Discord attachment, Imgur, YouTube, or Streamable link).'
+            );
+            return interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+        
+        // Validate proof URL
+        if (!isValidProofUrl(proofUrl)) {
+            const embed = createErrorEmbed(
+                'Invalid proof URL!\n\n' +
+                'Supported: Discord attachments, Imgur, YouTube, Streamable'
+            );
+            return interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+    } else {
+        // Ranked/competitive matches should have match_id for API verification
+        if (!matchId && !proofUrl) {
+            const embed = createErrorEmbed(
+                'Match ID or proof URL required!\n\n' +
+                'For ranked/competitive matches, provide a match_id for API verification.\n' +
+                'Alternatively, provide a proof_url.'
+            );
+            return interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+    }
 
-    const embed = createSuccessEmbed(
-        `✅ Win submitted successfully!\n\n` +
-        `**Wager ID:** ${wagerId}\n` +
-        `**Match ID:** ${matchId}\n\n` +
-        `Your opponent has 24 hours to dispute. If no dispute is filed, the wager will be automatically completed.`
-    );
+    // Submit win
+    wagerOps.submit(wagerId, matchId, interaction.user.id, proofUrl);
+
+    let message = `✅ Win submitted successfully!\n\n` +
+        `**Wager ID:** ${wagerId}\n`;
+    
+    if (matchId) {
+        message += `**Match ID:** ${matchId}\n`;
+    }
+    
+    if (proofUrl) {
+        message += `**Proof URL:** ${proofUrl}\n`;
+    }
+    
+    message += `\nYour opponent has 24 hours to dispute. If no dispute is filed, the wager will be automatically completed.`;
+
+    const embed = createSuccessEmbed(message);
 
     await interaction.reply({ embeds: [embed] });
 

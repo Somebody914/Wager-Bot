@@ -7,6 +7,7 @@ function createWagerEmbed(wager, creator, opponent = null) {
 
     const teamSize = wager.team_size || 1;
     const wagerType = wager.wager_type || 'solo';
+    const matchType = wager.match_type || 'ranked';
 
     const embed = new EmbedBuilder()
         .setTitle(`🎮 ${wager.game} Wager #${wager.id}${teamSize > 1 ? ` (${teamSize}v${teamSize})` : ''}`)
@@ -20,9 +21,18 @@ function createWagerEmbed(wager, creator, opponent = null) {
             { name: 'Status', value: wager.status.toUpperCase(), inline: true }
         );
 
+    // Add match type
+    const matchTypeEmoji = matchType === 'ranked' || matchType === 'competitive' ? '✅' : '📸';
+    embed.addFields({ name: 'Match Type', value: `${matchTypeEmoji} ${matchType.toUpperCase()}`, inline: true });
+
     if (teamSize > 1) {
         const typeDisplay = wagerType === 'lft' ? '🔍 LFT (Looking For Teammates)' : '👥 Team Wager';
         embed.addFields({ name: 'Type', value: typeDisplay, inline: true });
+    }
+
+    // Add proof URL if available
+    if (wager.proof_url) {
+        embed.addFields({ name: 'Proof', value: wager.proof_url });
     }
 
     embed.setTimestamp(new Date(wager.created_at))
@@ -61,8 +71,19 @@ function createDisputeEmbed(wager, dispute, filer) {
             { name: 'Amount', value: `${wager.amount} ETH`, inline: true },
             { name: 'Filed By', value: `<@${dispute.filer_id}>`, inline: true },
             { name: 'Reason', value: dispute.reason }
-        )
-        .setTimestamp(new Date(dispute.created_at))
+        );
+
+    // Add original proof if available
+    if (wager.proof_url) {
+        embed.addFields({ name: 'Original Proof', value: wager.proof_url });
+    }
+
+    // Add counter-proof if available
+    if (dispute.counter_proof) {
+        embed.addFields({ name: 'Counter-Proof', value: dispute.counter_proof });
+    }
+
+    embed.setTimestamp(new Date(dispute.created_at))
         .setFooter({ text: `Dispute ID: ${dispute.id}` });
 
     return embed;

@@ -37,6 +37,21 @@ const WAGER_TYPES = {
     LFT: 'lft' // Looking for teammates
 };
 
+// Match types
+const MATCH_TYPES = {
+    RANKED: 'ranked',
+    COMPETITIVE: 'competitive',
+    CUSTOM: 'custom',
+    CREATIVE: 'creative'
+};
+
+const MATCH_TYPE_CHOICES = [
+    { name: 'Ranked/Competitive (API Verified)', value: 'ranked' },
+    { name: 'Competitive Match', value: 'competitive' },
+    { name: 'Custom/Private Match (Requires Proof)', value: 'custom' },
+    { name: 'Creative Mode (Requires Proof)', value: 'creative' }
+];
+
 // Wager statuses
 const WAGER_STATUS = {
     OPEN: 'open',
@@ -60,12 +75,42 @@ const COLORS = {
     INFO: 0x5865F2
 };
 
+// URL validation helpers
+function isValidProofUrl(url) {
+    if (!url) return false;
+    
+    // Discord CDN attachments
+    if (url.includes('cdn.discordapp.com') || url.includes('media.discordapp.net')) {
+        return true;
+    }
+    
+    // Imgur
+    if (url.match(/^https?:\/\/(i\.)?imgur\.com\//)) {
+        return true;
+    }
+    
+    // YouTube
+    if (url.match(/^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//)) {
+        return true;
+    }
+    
+    // Streamable
+    if (url.match(/^https?:\/\/(www\.)?streamable\.com\//)) {
+        return true;
+    }
+    
+    return false;
+}
+
 module.exports = {
     GAMES,
     GAME_CHOICES,
     TEAM_SIZES,
     WAGER_TYPES,
+    MATCH_TYPES,
+    MATCH_TYPE_CHOICES,
     WAGER_STATUS,
     PLATFORM_FEE,
-    COLORS
+    COLORS,
+    isValidProofUrl
 };
