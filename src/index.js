@@ -4,6 +4,7 @@ const path = require('path');
 require('dotenv').config();
 
 const { initializeDatabase } = require('./services/database');
+const SchedulerService = require('./services/scheduler');
 
 // Create a new client instance
 const client = new Client({
@@ -15,6 +16,9 @@ const client = new Client({
         GatewayIntentBits.MessageContent
     ]
 });
+
+// Initialize scheduler
+let schedulerService;
 
 // Initialize commands collection
 client.commands = new Collection();
@@ -58,6 +62,12 @@ try {
     console.error('❌ Error initializing database:', error);
     process.exit(1);
 }
+
+// Start scheduler when bot is ready
+client.once('ready', () => {
+    schedulerService = new SchedulerService(client);
+    schedulerService.start();
+});
 
 // Error handling
 client.on('error', error => {

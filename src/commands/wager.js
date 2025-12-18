@@ -1,15 +1,17 @@
 const { SlashCommandBuilder } = require('discord.js');
-const { userOps, wagerOps, disputeOps, teamOps, participantOps, disputeVoteOps } = require('../services/database');
+const { userOps, wagerOps, disputeOps, teamOps, participantOps, disputeVoteOps, reputationOps } = require('../services/database');
 const { createWagerEmbed, createErrorEmbed, createSuccessEmbed, createDepositInstructionsEmbed, createInsufficientFundsEmbed } = require('../utils/embeds');
-const { GAME_CHOICES, PLATFORM_FEE, TEAM_SIZES, WAGER_TYPES, MATCH_TYPE_CHOICES, isValidProofUrl, calculatePayout, calculateFee } = require('../utils/constants');
+const { GAME_CHOICES, PLATFORM_FEE, TEAM_SIZES, WAGER_TYPES, MATCH_TYPE_CHOICES, isValidProofUrl, calculatePayout, calculateFee, getModeChoices, getTeamSizeForMode, getModeName } = require('../utils/constants');
 const { sendWagerAlert, notifyWagerAccepted, notifyWagerSubmitted, notifyWagerCompleted, notifyDispute, sendMatchResult, sendDisputeAlert } = require('../services/notifications');
 const EscrowService = require('../services/escrow');
 const WalletService = require('../services/wallet');
+const { ReputationService } = require('../services/reputation');
 const db = require('../services/database');
 
 // Initialize services
 const escrowService = new EscrowService(db);
 const walletService = new WalletService();
+const reputationService = new ReputationService();
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -48,7 +50,12 @@ module.exports = {
                     option.setName('match_type')
                         .setDescription('Type of match for verification')
                         .setRequired(false)
-                        .addChoices(...MATCH_TYPE_CHOICES)))
+                        .addChoices(...MATCH_TYPE_CHOICES))
+                .addStringOption(option =>
+                    option.setName('mode')
+                        .setDescription('Game mode (e.g., boxfight_2v2, zonewars_1v1)')
+                        .setRequired(false)
+                        .setAutocomplete(true)))
         .addSubcommand(subcommand =>
             subcommand
                 .setName('accept')
@@ -113,7 +120,25 @@ module.exports = {
                         .addChoices(
                             { name: 'Creator Side', value: 'creator' },
                             { name: 'Opponent Side', value: 'opponent' }
-                        ))),
+                        )))
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('ready')
+                .setDescription('Mark yourself as ready for the match')
+                .addIntegerOption(option =>
+                    option.setName('id')
+                        .setDescription('Wager ID')
+                        .setRequired(true)
+                        .setMinValue(1)))
+        .addSubcommand(subcommand =>
+            subcommand
+                .setName('confirm')
+                .setDescription('Confirm the match result (accept your loss)')
+                .addIntegerOption(option =>
+                    option.setName('id')
+                        .setDescription('Wager ID')
+                        .setRequired(true)
+                        .setMinValue(1))),
 
     async execute(interaction) {
         const subcommand = interaction.options.getSubcommand();
@@ -138,6 +163,12 @@ module.exports = {
                 case 'lft-join':
                     await handleLftJoin(interaction);
                     break;
+                case 'ready':
+                    await handleReady(interaction);
+                    break;
+                case 'confirm':
+                    await handleConfirm(interaction);
+                    break;
             }
         } catch (error) {
             console.error(`Error in wager ${subcommand}:`, error);
@@ -151,9 +182,10 @@ async function handleCreate(interaction) {
     const game = interaction.options.getString('game');
     const amount = interaction.options.getNumber('amount');
     const opponent = interaction.options.getUser('opponent');
-    const teamSize = interaction.options.getInteger('team_size') || 1;
+    const teamSize = interaction.options.getInteger('team_size');
     const teamId = interaction.options.getInteger('team_id');
     const matchType = interaction.options.getString('match_type') || 'ranked';
+    const mode = interaction.options.getString('mode');
 
     // Check if user is verified
     const user = userOps.get(interaction.user.id);
@@ -162,9 +194,35 @@ async function handleCreate(interaction) {
         return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
+    // Check reputation
+    if (!reputationService.canCreateWager(interaction.user.id)) {
+        const reputation = reputationService.getReputation(interaction.user.id);
+        const embed = createErrorEmbed(
+            `❌ **Insufficient Reputation**\n\n` +
+            `Your reputation score is too low to create wagers.\n` +
+            `Current Score: ${reputation.score}/100\n` +
+            `Required: 50+\n\n` +
+            `Improve your reputation by completing wagers honestly and avoiding no-shows.`
+        );
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    // Determine team size from mode if mode is specified
+    let finalTeamSize = teamSize;
+    if (mode) {
+        const modeTeamSize = getTeamSizeForMode(game, mode);
+        if (!modeTeamSize) {
+            const embed = createErrorEmbed('Invalid mode for the selected game.');
+            return interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+        finalTeamSize = modeTeamSize;
+    } else if (!finalTeamSize) {
+        finalTeamSize = 1; // Default to 1v1
+    }
+
     // Validate team size for the game
     const validTeamSizes = TEAM_SIZES[game] || [1];
-    if (!validTeamSizes.includes(teamSize)) {
+    if (!validTeamSizes.includes(finalTeamSize)) {
         const embed = createErrorEmbed(
             `Invalid team size for ${game}.\n\n` +
             `Valid team sizes: ${validTeamSizes.join(', ')}`
@@ -198,10 +256,10 @@ async function handleCreate(interaction) {
 
         // Check if team size matches
         const currentTeamSize = teamOps.getMemberCount(teamId);
-        if (currentTeamSize !== teamSize) {
+        if (currentTeamSize !== finalTeamSize) {
             const embed = createErrorEmbed(
                 `Team size mismatch.\n\n` +
-                `Your team has ${currentTeamSize} members, but you specified team size ${teamSize}.`
+                `Your team has ${currentTeamSize} members, but you specified team size ${finalTeamSize}.`
             );
             return interaction.reply({ embeds: [embed], ephemeral: true });
         }
@@ -230,7 +288,7 @@ async function handleCreate(interaction) {
 
     // Determine wager type
     let wagerType = WAGER_TYPES.SOLO;
-    if (teamSize > 1) {
+    if (finalTeamSize > 1) {
         wagerType = teamId ? WAGER_TYPES.TEAM : WAGER_TYPES.LFT;
     }
 
@@ -240,11 +298,12 @@ async function handleCreate(interaction) {
         opponent ? opponent.id : null,
         game,
         amount,
-        teamSize,
+        finalTeamSize,
         wagerType,
         teamId,
         null,
-        matchType
+        matchType,
+        mode
     );
 
     // Hold funds immediately for creator
@@ -270,14 +329,19 @@ async function handleCreate(interaction) {
 
     let message = `✅ Wager created successfully!\n\n` +
         `**Wager ID:** ${wagerId}\n` +
-        `**Game:** ${gameName}\n` +
-        `**Amount:** ${amount} ETH\n` +
+        `**Game:** ${gameName}\n`;
+    
+    if (mode) {
+        message += `**Mode:** ${getModeName(game, mode)}\n`;
+    }
+    
+    message += `**Amount:** ${amount} ETH\n` +
         `**Platform Fee:** ${fee} ETH (3%)\n` +
         `**Winner Payout:** ${payout} ETH\n` +
         `**Match Type:** ${matchTypeDisplay}\n`;
 
-    if (teamSize > 1) {
-        message += `**Team Size:** ${teamSize}v${teamSize}\n`;
+    if (finalTeamSize > 1) {
+        message += `**Team Size:** ${finalTeamSize}v${finalTeamSize}\n`;
         message += `**Type:** ${wagerType === WAGER_TYPES.TEAM ? 'Team Wager' : 'LFT (Looking For Teammates)'}\n`;
         if (team) {
             message += `**Your Team:** ${team.name}\n`;
@@ -329,6 +393,19 @@ async function handleAccept(interaction) {
         return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
+    // Check reputation
+    if (!reputationService.canWager(interaction.user.id)) {
+        const reputation = reputationService.getReputation(interaction.user.id);
+        const embed = createErrorEmbed(
+            `❌ **Insufficient Reputation**\n\n` +
+            `Your reputation score is too low to participate in wagers.\n` +
+            `Current Score: ${reputation.score}/100\n` +
+            `Required: 25+\n\n` +
+            `Improve your reputation by completing wagers honestly.`
+        );
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
     // Get wager
     const wager = wagerOps.get(wagerId);
     if (!wager) {
@@ -368,8 +445,9 @@ async function handleAccept(interaction) {
         return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
-    // Update status to in_progress since both parties have funds held
-    wagerOps.updateStatus(wagerId, 'in_progress');
+    // Set ready check deadline (15 minutes from now)
+    const readyDeadline = new Date(Date.now() + 15 * 60 * 1000);
+    wagerOps.setReadyDeadline(wagerId, readyDeadline);
 
     const gameName = GAME_CHOICES.find(g => g.value === wager.game)?.name || wager.game;
     const embed = createSuccessEmbed(
@@ -379,8 +457,9 @@ async function handleAccept(interaction) {
         `**Amount:** ${wager.amount} ETH\n\n` +
         `✅ **${wager.amount} ETH held from your balance**\n` +
         `💰 **New Available Balance:** ${(balanceInfo.availableBalance - wager.amount).toFixed(4)} ETH\n\n` +
-        `🎮 **Both players are funded! Match can begin now.**\n\n` +
-        `📊 Use \`/wager submit ${wagerId}\` to submit results after the match.`
+        `⏱️ **READY CHECK**: Both players must use \`/wager ready ${wagerId}\` within **15 minutes**!\n\n` +
+        `⚠️ Failure to ready up will result in cancellation and -10 reputation.\n\n` +
+        `📊 After both are ready, use \`/wager submit ${wagerId}\` to submit results.`
     );
 
     await interaction.reply({ embeds: [embed] });
@@ -471,6 +550,11 @@ async function handleSubmit(interaction) {
     // Submit win
     wagerOps.submit(wagerId, matchId, interaction.user.id, proofUrl);
 
+    // Set confirmation deadline (30 minutes from now)
+    const confirmDeadline = new Date(Date.now() + 30 * 60 * 1000);
+    wagerOps.setConfirmDeadline(wagerId, confirmDeadline);
+    wagerOps.updateStatus(wagerId, 'pending_confirmation');
+
     let message = `✅ Win submitted successfully!\n\n` +
         `**Wager ID:** ${wagerId}\n`;
     
@@ -482,44 +566,31 @@ async function handleSubmit(interaction) {
         message += `**Proof URL:** ${proofUrl}\n`;
     }
     
-    message += `\nYour opponent has 24 hours to dispute. If no dispute is filed, the wager will be automatically completed.`;
+    message += `\n⏱️ **Opponent has 30 minutes to:**\n` +
+        `• \`/wager confirm ${wagerId}\` - Accept the loss\n` +
+        `• \`/wager dispute ${wagerId}\` - Contest the result\n\n` +
+        `⚠️ If no response, you win automatically.`;
 
     const embed = createSuccessEmbed(message);
 
     await interaction.reply({ embeds: [embed] });
 
     // Notify opponent
-    await notifyWagerSubmitted(interaction.client, wager, interaction.user.id);
-
-    // Auto-complete after verification period (in production, this would be handled by a scheduled job)
-    // For now, we'll complete it immediately
-    setTimeout(async () => {
-        const currentWager = wagerOps.get(wagerId);
-        if (currentWager.status === 'pending_verification') {
-            wagerOps.complete(wagerId, interaction.user.id);
-            
-            const loserId = interaction.user.id === wager.creator_id ? wager.opponent_id : wager.creator_id;
-            
-            // Process wager result with wallet service
-            try {
-                walletService.processWagerResult(
-                    wagerId,
-                    interaction.user.id,
-                    loserId,
-                    wager.amount
-                );
-                
-                // Release escrowed funds to winner (kept for compatibility)
-                escrowService.releaseFunds(wagerId, interaction.user.id);
-            } catch (error) {
-                console.error('Error processing wager result:', error);
-            }
-            
-            // Send notifications
-            await notifyWagerCompleted(interaction.client, wager, interaction.user.id);
-            await sendMatchResult(interaction.client, wager, interaction.user.id, loserId);
-        }
-    }, 1000); // In production, this would be 24 hours
+    const opponentId = wager.creator_id === interaction.user.id ? wager.opponent_id : wager.creator_id;
+    try {
+        const opponent = await interaction.client.users.fetch(opponentId);
+        await opponent.send(
+            `⚠️ **Wager #${wagerId} - Result Submitted**\n\n` +
+            `<@${interaction.user.id}> claims to have won.\n\n` +
+            `**You have 30 minutes to:**\n` +
+            `• \`/wager confirm ${wagerId}\` - Accept the loss\n` +
+            `• \`/wager dispute ${wagerId}\` - Contest the result\n\n` +
+            `⏱️ Deadline: <t:${Math.floor(confirmDeadline.getTime() / 1000)}:R>\n\n` +
+            `⚠️ No response = automatic loss.`
+        ).catch(err => console.error('Could not DM opponent:', err));
+    } catch (error) {
+        console.error('Error notifying opponent:', error);
+    }
 }
 
 async function handleDispute(interaction) {
@@ -682,5 +753,171 @@ async function handleLftJoin(interaction) {
                 console.error('Error notifying creator:', error);
             }
         }
+    }
+}
+
+async function handleReady(interaction) {
+    const wagerId = interaction.options.getInteger('id');
+
+    // Get wager
+    const wager = wagerOps.get(wagerId);
+    if (!wager) {
+        const embed = createErrorEmbed('Wager not found.');
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    // Validate wager status
+    if (wager.status !== 'pending_ready') {
+        const embed = createErrorEmbed('This wager is not waiting for ready check.');
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    // Validate participant
+    const userId = interaction.user.id;
+    const isCreator = wager.creator_id === userId;
+    const isOpponent = wager.opponent_id === userId;
+
+    if (!isCreator && !isOpponent) {
+        const embed = createErrorEmbed('You are not a participant in this wager.');
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    // Check if already ready
+    if ((isCreator && wager.creator_ready) || (isOpponent && wager.opponent_ready)) {
+        const embed = createErrorEmbed('You have already marked yourself as ready!');
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    // Mark as ready
+    if (isCreator) {
+        wagerOps.setCreatorReady(wagerId);
+    } else {
+        wagerOps.setOpponentReady(wagerId);
+    }
+
+    const updatedWager = wagerOps.get(wagerId);
+
+    // Check if both ready
+    if (updatedWager.creator_ready && updatedWager.opponent_ready) {
+        wagerOps.updateStatus(wagerId, 'in_progress');
+        
+        const embed = createSuccessEmbed(
+            `✅ **All players ready! Match is LIVE!**\n\n` +
+            `**Wager ID:** ${wagerId}\n\n` +
+            `🎮 **Good luck! May the best player win!**\n\n` +
+            `📊 Use \`/wager submit ${wagerId}\` to submit results after the match.`
+        );
+        
+        await interaction.reply({ embeds: [embed] });
+
+        // Notify both players
+        try {
+            const creator = await interaction.client.users.fetch(wager.creator_id);
+            const opponent = await interaction.client.users.fetch(wager.opponent_id);
+            
+            const notificationMsg = `✅ **Wager #${wagerId} is LIVE!**\n\nBoth players are ready. Good luck!`;
+            
+            if (userId !== wager.creator_id) {
+                await creator.send(notificationMsg).catch(err => console.error('Could not DM creator:', err));
+            }
+            if (userId !== wager.opponent_id) {
+                await opponent.send(notificationMsg).catch(err => console.error('Could not DM opponent:', err));
+            }
+        } catch (error) {
+            console.error('Error sending ready notifications:', error);
+        }
+    } else {
+        const embed = createSuccessEmbed(
+            `✅ **You're ready!**\n\n` +
+            `Waiting for opponent to ready up...\n\n` +
+            `⏱️ Ready check expires: <t:${Math.floor(new Date(wager.ready_deadline).getTime() / 1000)}:R>`
+        );
+        
+        await interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+}
+
+async function handleConfirm(interaction) {
+    const wagerId = interaction.options.getInteger('id');
+
+    // Get wager
+    const wager = wagerOps.get(wagerId);
+    if (!wager) {
+        const embed = createErrorEmbed('Wager not found.');
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    // Validate wager status
+    if (wager.status !== 'pending_verification') {
+        const embed = createErrorEmbed('This wager is not waiting for confirmation.');
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    // Validate participant
+    const userId = interaction.user.id;
+    if (wager.creator_id !== userId && wager.opponent_id !== userId) {
+        const embed = createErrorEmbed('You are not a participant in this wager.');
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    // Can't confirm your own submission
+    if (wager.submitted_by === userId) {
+        const embed = createErrorEmbed('You submitted the win. Waiting for opponent to confirm or dispute.');
+        return interaction.reply({ embeds: [embed], ephemeral: true });
+    }
+
+    // Complete the wager - winner is whoever submitted
+    const winnerId = wager.submitted_by;
+    const loserId = userId;
+
+    wagerOps.complete(wagerId, winnerId);
+
+    // Process funds
+    try {
+        const payout = calculatePayout(wager.amount);
+        
+        // Winner gets payout
+        walletService.loseFunds(winnerId, wager.amount, wagerId, 'Wager entry');
+        walletService.winFunds(winnerId, payout, wagerId, 'Wager won');
+        
+        // Loser loses their held funds
+        walletService.loseFunds(loserId, wager.amount, wagerId, 'Wager lost');
+    } catch (error) {
+        console.error('Error processing wager result:', error);
+    }
+
+    // Update reputation
+    try {
+        reputationService.reward(winnerId, 'WAGER_COMPLETE', wagerId);
+        reputationService.reward(loserId, 'WAGER_COMPLETE', wagerId);
+        
+        // Quick confirmation bonus
+        reputationService.reward(loserId, 'CONFIRM_QUICK', wagerId);
+    } catch (error) {
+        console.error('Error updating reputation:', error);
+    }
+
+    const payout = calculatePayout(wager.amount).toFixed(4);
+    const embed = createSuccessEmbed(
+        `✅ **Result confirmed!**\n\n` +
+        `**Winner:** <@${winnerId}>\n` +
+        `**Payout:** ${payout} ETH\n\n` +
+        `**GG! Better luck next time.**\n\n` +
+        `+1 reputation for quick confirmation! 🏆`
+    );
+
+    await interaction.reply({ embeds: [embed] });
+
+    // Notify winner
+    try {
+        const winner = await interaction.client.users.fetch(winnerId);
+        await winner.send(
+            `✅ **Wager #${wagerId} Completed!**\n\n` +
+            `Your opponent confirmed the result.\n` +
+            `**Payout:** ${payout} ETH\n\n` +
+            `GG!`
+        ).catch(err => console.error('Could not DM winner:', err));
+    } catch (error) {
+        console.error('Error notifying winner:', error);
     }
 }
