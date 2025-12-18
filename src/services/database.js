@@ -198,6 +198,39 @@ function initializeDatabase() {
         )
     `);
 
+    // User wallets table (simplified wallet balance system)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS user_wallets (
+            discord_id TEXT PRIMARY KEY,
+            deposit_address TEXT UNIQUE NOT NULL,
+            available_balance REAL DEFAULT 0,
+            held_balance REAL DEFAULT 0,
+            total_deposited REAL DEFAULT 0,
+            total_withdrawn REAL DEFAULT 0,
+            total_won REAL DEFAULT 0,
+            total_lost REAL DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (discord_id) REFERENCES users(discord_id)
+        )
+    `);
+
+    // Wallet transactions table (for transparency)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS wallet_transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            discord_id TEXT NOT NULL,
+            type TEXT NOT NULL,
+            amount REAL NOT NULL,
+            wager_id INTEGER,
+            tx_hash TEXT,
+            status TEXT DEFAULT 'completed',
+            description TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (discord_id) REFERENCES users(discord_id),
+            FOREIGN KEY (wager_id) REFERENCES wagers(id)
+        )
+    `);
+
     console.log('✅ Database initialized successfully');
 }
 
@@ -560,6 +593,187 @@ const escrowOps = {
     }
 };
 
+// Wallet operations
+const walletOps = {
+    create(discordId, depositAddress) {
+        const stmt = db.prepare(`
+            INSERT INTO user_wallets (discord_id, deposit_address) 
+            VALUES (?, ?)
+        `);
+        return stmt.run(discordId, depositAddress);
+    },
+
+    get(discordId) {
+        const stmt = db.prepare('SELECT * FROM user_wallets WHERE discord_id = ?');
+        return stmt.get(discordId);
+    },
+
+    getByDepositAddress(address) {
+        const stmt = db.prepare('SELECT * FROM user_wallets WHERE deposit_address = ?');
+        return stmt.get(address);
+    },
+
+    addFunds(discordId, amount, txHash, description = 'Deposit') {
+        const transaction = db.transaction(() => {
+            // Update wallet balance
+            const updateStmt = db.prepare(`
+                UPDATE user_wallets 
+                SET available_balance = available_balance + ?,
+                    total_deposited = total_deposited + ?
+                WHERE discord_id = ?
+            `);
+            updateStmt.run(amount, amount, discordId);
+
+            // Record transaction
+            const txStmt = db.prepare(`
+                INSERT INTO wallet_transactions 
+                (discord_id, type, amount, tx_hash, description) 
+                VALUES (?, ?, ?, ?, ?)
+            `);
+            return txStmt.run(discordId, 'deposit', amount, txHash, description);
+        });
+        
+        return transaction();
+    },
+
+    holdFunds(discordId, amount, wagerId, description = 'Wager hold') {
+        const transaction = db.transaction(() => {
+            // Check if sufficient balance
+            const wallet = walletOps.get(discordId);
+            if (!wallet || wallet.available_balance < amount) {
+                throw new Error('Insufficient balance');
+            }
+
+            // Move funds from available to held
+            const updateStmt = db.prepare(`
+                UPDATE user_wallets 
+                SET available_balance = available_balance - ?,
+                    held_balance = held_balance + ?
+                WHERE discord_id = ?
+            `);
+            updateStmt.run(amount, amount, discordId);
+
+            // Record transaction
+            const txStmt = db.prepare(`
+                INSERT INTO wallet_transactions 
+                (discord_id, type, amount, wager_id, description) 
+                VALUES (?, ?, ?, ?, ?)
+            `);
+            return txStmt.run(discordId, 'wager_hold', amount, wagerId, description);
+        });
+        
+        return transaction();
+    },
+
+    releaseFunds(discordId, amount, wagerId, description = 'Wager cancelled') {
+        const transaction = db.transaction(() => {
+            // Move funds from held back to available
+            const updateStmt = db.prepare(`
+                UPDATE user_wallets 
+                SET available_balance = available_balance + ?,
+                    held_balance = held_balance - ?
+                WHERE discord_id = ?
+            `);
+            updateStmt.run(amount, amount, discordId);
+
+            // Record transaction
+            const txStmt = db.prepare(`
+                INSERT INTO wallet_transactions 
+                (discord_id, type, amount, wager_id, description) 
+                VALUES (?, ?, ?, ?, ?)
+            `);
+            return txStmt.run(discordId, 'wager_release', amount, wagerId, description);
+        });
+        
+        return transaction();
+    },
+
+    winFunds(discordId, amount, wagerId, description = 'Wager won') {
+        const transaction = db.transaction(() => {
+            // Add winnings to available balance and update stats
+            const updateStmt = db.prepare(`
+                UPDATE user_wallets 
+                SET available_balance = available_balance + ?,
+                    total_won = total_won + ?
+                WHERE discord_id = ?
+            `);
+            updateStmt.run(amount, amount, discordId);
+
+            // Record transaction
+            const txStmt = db.prepare(`
+                INSERT INTO wallet_transactions 
+                (discord_id, type, amount, wager_id, description) 
+                VALUES (?, ?, ?, ?, ?)
+            `);
+            return txStmt.run(discordId, 'wager_win', amount, wagerId, description);
+        });
+        
+        return transaction();
+    },
+
+    loseFunds(discordId, amount, wagerId, description = 'Wager lost') {
+        const transaction = db.transaction(() => {
+            // Remove held funds and update stats
+            const updateStmt = db.prepare(`
+                UPDATE user_wallets 
+                SET held_balance = held_balance - ?,
+                    total_lost = total_lost + ?
+                WHERE discord_id = ?
+            `);
+            updateStmt.run(amount, amount, discordId);
+
+            // Record transaction
+            const txStmt = db.prepare(`
+                INSERT INTO wallet_transactions 
+                (discord_id, type, amount, wager_id, description) 
+                VALUES (?, ?, ?, ?, ?)
+            `);
+            return txStmt.run(discordId, 'wager_loss', amount, wagerId, description);
+        });
+        
+        return transaction();
+    },
+
+    withdraw(discordId, amount, txHash, description = 'Withdrawal') {
+        const transaction = db.transaction(() => {
+            // Check if sufficient balance
+            const wallet = this.get(discordId);
+            if (!wallet || wallet.available_balance < amount) {
+                throw new Error('Insufficient balance');
+            }
+
+            // Reduce available balance
+            const updateStmt = db.prepare(`
+                UPDATE user_wallets 
+                SET available_balance = available_balance - ?,
+                    total_withdrawn = total_withdrawn + ?
+                WHERE discord_id = ?
+            `);
+            updateStmt.run(amount, amount, discordId);
+
+            // Record transaction
+            const txStmt = db.prepare(`
+                INSERT INTO wallet_transactions 
+                (discord_id, type, amount, tx_hash, description, status) 
+                VALUES (?, ?, ?, ?, ?, ?)
+            `);
+            return txStmt.run(discordId, 'withdraw', amount, txHash, description, 'pending');
+        });
+        
+        return transaction();
+    },
+
+    getTransactions(discordId, limit = 10) {
+        const stmt = db.prepare(`
+            SELECT * FROM wallet_transactions 
+            WHERE discord_id = ? 
+            ORDER BY created_at DESC 
+            LIMIT ?
+        `);
+        return stmt.all(discordId, limit);
+    }
+};
+
 module.exports = {
     initializeDatabase,
     userOps,
@@ -571,5 +785,6 @@ module.exports = {
     teamOps,
     participantOps,
     escrowOps,
+    walletOps,
     db
 };

@@ -24,9 +24,16 @@ A comprehensive Discord bot for managing crypto gaming wagers on the Wager platf
 - Automatic "Verified" role assignment
 - Channel moderation for wager-alerts and disputes channels
 
+### 💰 Simplified Wallet System
+- **Pre-Funded Balance**: Deposit funds once, use for all wagers
+- **Instant Wager Creation**: Funds automatically held when creating/accepting wagers
+- **Automatic Payouts**: Winners receive payouts automatically to their balance
+- **Easy Withdrawals**: Withdraw unused funds anytime to your verified wallet
+- **Transaction History**: Track all deposits, wagers, wins, losses, and withdrawals
+- **Real-Time Balance**: View available balance, held balance, and total at any time
+
 ### 💎 Additional Features
 - 3% platform fee calculation
-- Escrow balance tracking
 - Rich embeds for all messages
 - Interactive buttons for quick actions
 - Support for 7 major games
@@ -64,7 +71,11 @@ A comprehensive Discord bot for managing crypto gaming wagers on the Wager platf
   - Valorant/LoL: Use Riot ID format `name#tag` (e.g., `Player#NA1`)
   - CS2: Use Steam ID64 or custom URL
   - Other games: Use in-game username
-- `/balance` - Check your escrow balance
+
+### Wallet Management
+- `/deposit` - Get your unique deposit address to add funds to your bot balance
+- `/balance` - Check your wallet balance, stats, and transaction history
+- `/withdraw <amount>` - Withdraw funds from your balance to your verified wallet
 
 ### Wager Commands
 - `/wager create <game> <amount> [opponent] [team_size] [team_id] [match_type]` - Create a new wager
@@ -221,6 +232,13 @@ VERIFIED_ROLE_ID=role_id_for_verified_users
 RIOT_API_KEY=your_riot_api_key
 STEAM_API_KEY=your_steam_api_key
 TRACKER_API_KEY=your_tracker_gg_api_key
+
+# Wallet Configuration (NEW - Simplified Balance System)
+MASTER_WALLET_PRIVATE_KEY=your_private_key_here
+BLOCKCHAIN_RPC_URL=https://mainnet.infura.io/v3/YOUR_KEY
+DEPOSIT_CONFIRMATION_BLOCKS=3
+MIN_DEPOSIT=0.001
+MIN_WITHDRAWAL=0.005
 ```
 
 **Required Variables:**
@@ -231,6 +249,13 @@ TRACKER_API_KEY=your_tracker_gg_api_key
 - `MATCH_RESULTS_CHANNEL` - Channel ID where match results will be posted
 - `DISPUTES_CHANNEL` - Channel ID where disputes will be posted
 - `VERIFIED_ROLE_ID` - Role ID for verified users
+
+**Wallet Configuration (NEW):**
+- `MASTER_WALLET_PRIVATE_KEY` - Private key for the master wallet (keep secure!)
+- `BLOCKCHAIN_RPC_URL` - RPC URL for blockchain connection (e.g., Infura)
+- `DEPOSIT_CONFIRMATION_BLOCKS` - Number of confirmations required for deposits (default: 3)
+- `MIN_DEPOSIT` - Minimum deposit amount in ETH (default: 0.001)
+- `MIN_WITHDRAWAL` - Minimum withdrawal amount in ETH (default: 0.005)
 
 **Optional Variables (for enhanced features):**
 - `MODERATION_ENABLED` - Enable/disable channel moderation (default: false)
@@ -358,6 +383,71 @@ The bot uses SQLite with the following tables:
 - `voter_id` (Foreign Key)
 - `vote` (creator/opponent)
 - `created_at` (Timestamp)
+
+### User Wallets (NEW - Simplified System)
+- `discord_id` (Primary Key, Foreign Key)
+- `deposit_address` (Unique) - Personal deposit address for each user
+- `available_balance` (Decimal) - Funds available to wager or withdraw
+- `held_balance` (Decimal) - Funds locked in active wagers
+- `total_deposited` (Decimal) - Lifetime deposits
+- `total_withdrawn` (Decimal) - Lifetime withdrawals
+- `total_won` (Decimal) - Total winnings
+- `total_lost` (Decimal) - Total losses
+- `created_at` (Timestamp)
+
+### Wallet Transactions (NEW)
+- `id` (Primary Key)
+- `discord_id` (Foreign Key)
+- `type` (deposit/withdraw/wager_hold/wager_release/wager_win/wager_loss/refund)
+- `amount` (Decimal)
+- `wager_id` (Foreign Key, nullable) - Linked wager if applicable
+- `tx_hash` (String, nullable) - Blockchain transaction hash
+- `status` (completed/pending)
+- `description` (Text)
+- `created_at` (Timestamp)
+
+## Quick Start Guide
+
+### First Time Setup
+
+1. **Verify Your Wallet**
+   ```
+   /verify 0xYourEthereumWalletAddress
+   ```
+   Link your Discord account to your Ethereum wallet.
+
+2. **Add Funds**
+   ```
+   /deposit
+   ```
+   Get your unique deposit address. Send ETH to this address from your verified wallet.
+
+3. **Check Balance**
+   ```
+   /balance
+   ```
+   Confirm your deposit has been detected and is available.
+
+4. **Create Your First Wager**
+   ```
+   /wager create game:Valorant amount:0.1
+   ```
+   Funds are automatically held from your balance!
+
+### Daily Usage
+
+Once you have funds in your balance, wagering is simple:
+
+1. **Create or Accept Wagers** - Funds automatically held
+2. **Play Your Match** - Have fun!
+3. **Submit Results** - Use `/wager submit`
+4. **Get Paid** - Winnings automatically added to your balance
+
+**Cash Out Anytime:**
+```
+/withdraw 0.5
+```
+Withdraw unused funds back to your verified wallet.
 
 ## Usage Examples
 

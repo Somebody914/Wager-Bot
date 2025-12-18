@@ -142,8 +142,13 @@ function createHelpEmbed() {
             {
                 name: '🔗 Account Management',
                 value: '`/verify <wallet>` - Link your Discord to an ETH wallet\n' +
-                       '`/link <game> <username>` - Link a gaming account\n' +
-                       '`/balance` - Check your escrow balance'
+                       '`/link <game> <username>` - Link a gaming account'
+            },
+            {
+                name: '💰 Wallet Commands',
+                value: '`/deposit` - Get your deposit address to add funds\n' +
+                       '`/balance` - View balance, stats, and transaction history\n' +
+                       '`/withdraw <amount>` - Withdraw funds to your verified wallet'
             },
             {
                 name: '🎮 Wager Commands',
@@ -179,11 +184,13 @@ function createHelpEmbed() {
             },
             {
                 name: '💡 Tips',
-                value: '• Wagers require 3% platform fee\n' +
-                       '• Winner receives 97% of total pot\n' +
+                value: '• Deposit funds once, use for all wagers\n' +
+                       '• Funds held automatically when creating/accepting wagers\n' +
+                       '• Winner receives 97% of total pot (3% platform fee)\n' +
                        '• Custom matches need proof URLs\n' +
                        '• Disputes can be voted on by community\n' +
-                       '• Moderators resolve contested disputes'
+                       '• Moderators resolve contested disputes\n' +
+                       '• Withdraw unused funds anytime'
             }
         )
         .setTimestamp();
@@ -271,6 +278,65 @@ function createDepositInstructionsEmbed(wagerId, escrowAddress, amount) {
     return embed;
 }
 
+function createInsufficientFundsEmbed(required, available) {
+    return new EmbedBuilder()
+        .setTitle('❌ Insufficient Balance')
+        .setDescription(
+            `You don't have enough funds in your wallet to create or accept this wager.\n\n` +
+            `**Required:** ${required.toFixed(4)} ETH\n` +
+            `**Available:** ${available.toFixed(4)} ETH\n` +
+            `**Needed:** ${(required - available).toFixed(4)} ETH`
+        )
+        .addFields({
+            name: '💡 How to Add Funds',
+            value: 'Use `/deposit` to get your unique deposit address and add funds to your wallet.',
+            inline: false
+        })
+        .setColor(COLORS.ERROR)
+        .setTimestamp();
+}
+
+function createBalanceEmbed(wallet, stats) {
+    return new EmbedBuilder()
+        .setTitle('💰 Your Wallet')
+        .setColor(COLORS.PRIMARY)
+        .setDescription(
+            `**Available:** ${wallet.available_balance.toFixed(4)} ETH _(can wager or withdraw)_\n` +
+            `**In Wagers:** ${wallet.held_balance.toFixed(4)} ETH _(locked in active matches)_\n` +
+            `**Total:** ${(wallet.available_balance + wallet.held_balance).toFixed(4)} ETH`
+        )
+        .addFields(
+            { 
+                name: '📊 Statistics', 
+                value: 
+                    `**Total Deposited:** ${wallet.total_deposited.toFixed(4)} ETH\n` +
+                    `**Total Withdrawn:** ${wallet.total_withdrawn.toFixed(4)} ETH\n` +
+                    `**Total Won:** ${wallet.total_won.toFixed(4)} ETH\n` +
+                    `**Total Lost:** ${wallet.total_lost.toFixed(4)} ETH`,
+                inline: false 
+            }
+        )
+        .setFooter({ text: 'Your wallet is ready to use!' })
+        .setTimestamp();
+}
+
+function createWithdrawEmbed(amount, txHash, toAddress) {
+    return new EmbedBuilder()
+        .setTitle('✅ Withdrawal Initiated')
+        .setColor(COLORS.SUCCESS)
+        .setDescription(
+            `Your withdrawal has been initiated and will be processed shortly.`
+        )
+        .addFields(
+            { name: '💰 Amount', value: `${amount.toFixed(4)} ETH`, inline: true },
+            { name: '📍 To Address', value: `\`${toAddress}\``, inline: false },
+            { name: '🔗 Transaction Hash', value: `\`${txHash}\``, inline: false },
+            { name: '⏱️ Status', value: 'Pending confirmation', inline: false }
+        )
+        .setFooter({ text: 'You will receive a notification when complete' })
+        .setTimestamp();
+}
+
 module.exports = {
     createWagerEmbed,
     createMatchResultEmbed,
@@ -281,5 +347,8 @@ module.exports = {
     createErrorEmbed,
     createSuccessEmbed,
     createEscrowEmbed,
-    createDepositInstructionsEmbed
+    createDepositInstructionsEmbed,
+    createInsufficientFundsEmbed,
+    createBalanceEmbed,
+    createWithdrawEmbed
 };

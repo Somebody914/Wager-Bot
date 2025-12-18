@@ -3,10 +3,12 @@ const { userOps, wagerOps, disputeOps, disputeVoteOps } = require('../services/d
 const { createErrorEmbed, createSuccessEmbed, createDisputeEmbed } = require('../utils/embeds');
 const { isValidProofUrl, calculatePayout } = require('../utils/constants');
 const EscrowService = require('../services/escrow');
+const WalletService = require('../services/wallet');
 const db = require('../services/database');
 
-// Initialize escrow service
+// Initialize services
 const escrowService = new EscrowService(db);
+const walletService = new WalletService();
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -240,11 +242,17 @@ async function handleResolve(interaction) {
         wagerOps.cancel(dispute.wager_id);
         disputeOps.resolve(disputeId, 'resolved');
 
-        // Refund escrow funds to both parties
+        // Release held funds back to both parties
         try {
+            walletService.releaseHeldFunds(wager.creator_id, wager.amount, dispute.wager_id);
+            if (wager.opponent_id) {
+                walletService.releaseHeldFunds(wager.opponent_id, wager.amount, dispute.wager_id);
+            }
+            
+            // Also refund escrow funds (kept for compatibility)
             escrowService.refundFunds(dispute.wager_id);
         } catch (error) {
-            console.error('Error refunding escrow funds:', error);
+            console.error('Error refunding funds:', error);
         }
 
         const embed = createSuccessEmbed(
@@ -253,7 +261,7 @@ async function handleResolve(interaction) {
             `**Wager ID:** ${dispute.wager_id}\n` +
             `**Decision:** Wager cancelled\n` +
             `**Reason:** ${reason}\n\n` +
-            `💰 **Escrow funds have been refunded** to both parties.\n\n` +
+            `💰 **Funds have been refunded** to both parties.\n\n` +
             `Both parties have been notified.`
         );
 
@@ -266,7 +274,7 @@ async function handleResolve(interaction) {
                 `⚖️ **Dispute Resolved**\n\n` +
                 `Wager #${dispute.wager_id} has been cancelled by a moderator.\n` +
                 `Reason: ${reason}\n\n` +
-                `💰 Your deposit has been refunded from escrow.`
+                `💰 Your ${wager.amount} ETH has been refunded to your balance.`
             );
         } catch (error) {
             console.error('Error notifying creator:', error);
@@ -278,7 +286,7 @@ async function handleResolve(interaction) {
                 `⚖️ **Dispute Resolved**\n\n` +
                 `Wager #${dispute.wager_id} has been cancelled by a moderator.\n` +
                 `Reason: ${reason}\n\n` +
-                `💰 Your deposit has been refunded from escrow.`
+                `💰 Your ${wager.amount} ETH has been refunded to your balance.`
             );
         } catch (error) {
             console.error('Error notifying opponent:', error);
@@ -292,16 +300,22 @@ async function handleResolve(interaction) {
         wagerOps.complete(dispute.wager_id, winnerId);
         disputeOps.resolve(disputeId, 'resolved');
 
-        // Release escrow funds to winner
+        // Process wager result with wallet service
         try {
+            walletService.processWagerResult(
+                dispute.wager_id,
+                winnerId,
+                loserId,
+                wager.amount
+            );
+            
+            // Release escrow funds to winner (kept for compatibility)
             escrowService.releaseFunds(dispute.wager_id, winnerId);
         } catch (error) {
-            console.error('Error releasing escrow funds:', error);
+            console.error('Error processing wager result:', error);
         }
 
-        // Update balances
         const payout = calculatePayout(wager.amount);
-        userOps.updateBalance(winnerId, payout);
 
         const embed = createSuccessEmbed(
             `✅ Dispute resolved!\n\n` +
@@ -310,7 +324,7 @@ async function handleResolve(interaction) {
             `**Winner:** <@${winnerId}>\n` +
             `**Payout:** ${payout.toFixed(4)} ETH\n` +
             `**Reason:** ${reason}\n\n` +
-            `💰 **Escrow funds have been released** to the winner.\n\n` +
+            `💰 **Funds have been credited** to the winner's balance.\n\n` +
             `Both parties have been notified.`
         );
 
@@ -324,7 +338,7 @@ async function handleResolve(interaction) {
                 `Wager #${dispute.wager_id} has been resolved in your favor.\n` +
                 `Payout: ${payout.toFixed(4)} ETH\n` +
                 `Reason: ${reason}\n\n` +
-                `💰 Escrow funds have been released to your wallet.`
+                `💰 ${payout.toFixed(4)} ETH has been credited to your balance.`
             );
         } catch (error) {
             console.error('Error notifying winner:', error);

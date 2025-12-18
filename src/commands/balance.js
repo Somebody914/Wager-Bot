@@ -1,12 +1,15 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { userOps } = require('../services/database');
+const WalletService = require('../services/wallet');
 const { COLORS } = require('../utils/constants');
 const { createErrorEmbed } = require('../utils/embeds');
+
+const walletService = new WalletService();
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('balance')
-        .setDescription('Check your escrow balance'),
+        .setDescription('Check your wallet balance and statistics'),
 
     async execute(interaction) {
         try {
@@ -17,16 +20,38 @@ module.exports = {
                 return interaction.reply({ embeds: [embed], ephemeral: true });
             }
 
-            const balance = userOps.getBalance(interaction.user.id);
+            // Get wallet balance info
+            const balanceInfo = walletService.getBalanceInfo(interaction.user.id);
 
             const embed = new EmbedBuilder()
-                .setTitle('💰 Your Balance')
+                .setTitle('💰 Your Wallet')
                 .setColor(COLORS.PRIMARY)
-                .addFields(
-                    { name: 'Wallet Address', value: user.wallet_address || 'Not verified', inline: false },
-                    { name: 'Escrow Balance', value: `${balance.toFixed(4)} ETH`, inline: false }
+                .setDescription(
+                    `**Available:** ${balanceInfo.availableBalance.toFixed(4)} ETH _(can wager or withdraw)_\n` +
+                    `**In Wagers:** ${balanceInfo.heldBalance.toFixed(4)} ETH _(locked in active matches)_\n` +
+                    `**Total:** ${balanceInfo.totalBalance.toFixed(4)} ETH`
                 )
-                .setFooter({ text: 'Funds are held in escrow until wagers are completed' })
+                .addFields(
+                    { 
+                        name: '📊 Statistics', 
+                        value: 
+                            `**Total Deposited:** ${balanceInfo.totalDeposited.toFixed(4)} ETH\n` +
+                            `**Total Withdrawn:** ${balanceInfo.totalWithdrawn.toFixed(4)} ETH\n` +
+                            `**Total Won:** ${balanceInfo.totalWon.toFixed(4)} ETH\n` +
+                            `**Total Lost:** ${balanceInfo.totalLost.toFixed(4)} ETH\n` +
+                            `**Net Profit:** ${balanceInfo.netProfit >= 0 ? '+' : ''}${balanceInfo.netProfit.toFixed(4)} ETH`,
+                        inline: false 
+                    },
+                    {
+                        name: '💡 Quick Actions',
+                        value: 
+                            '• Use `/deposit` to add funds\n' +
+                            '• Use `/withdraw <amount>` to cash out\n' +
+                            '• Use `/wager create` to start a match',
+                        inline: false
+                    }
+                )
+                .setFooter({ text: 'Your wallet is ready to use!' })
                 .setTimestamp();
 
             await interaction.reply({ embeds: [embed], ephemeral: true });
