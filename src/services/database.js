@@ -24,6 +24,8 @@ function initializeDatabase() {
             platform TEXT NOT NULL,
             username TEXT NOT NULL,
             verified INTEGER DEFAULT 0,
+            platform_id TEXT,
+            verified_at DATETIME,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (discord_id) REFERENCES users(discord_id),
             UNIQUE(discord_id, platform)
@@ -99,9 +101,14 @@ const userOps = {
 
 // Linked accounts operations
 const linkedAccountOps = {
-    create(discordId, platform, username) {
-        const stmt = db.prepare('INSERT OR REPLACE INTO linked_accounts (discord_id, platform, username) VALUES (?, ?, ?)');
-        return stmt.run(discordId, platform, username);
+    create(discordId, platform, username, platformId = null, verified = 0) {
+        const stmt = db.prepare(`
+            INSERT OR REPLACE INTO linked_accounts 
+            (discord_id, platform, username, platform_id, verified, verified_at) 
+            VALUES (?, ?, ?, ?, ?, ?)
+        `);
+        const verifiedAt = verified ? new Date().toISOString() : null;
+        return stmt.run(discordId, platform, username, platformId, verified, verifiedAt);
     },
 
     get(discordId, platform) {
