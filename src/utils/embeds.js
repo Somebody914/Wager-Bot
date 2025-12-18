@@ -142,14 +142,13 @@ function createHelpEmbed() {
             {
                 name: '🔗 Account Management',
                 value: '`/verify <wallet>` - Link your Discord to an ETH wallet\n' +
-                       '`/link <game> <username>` - Link a gaming account\n' +
-                       '`/balance` - Check your wallet balance and stats'
+                       '`/link <game> <username>` - Link a gaming account'
             },
             {
                 name: '💰 Wallet Commands',
                 value: '`/deposit` - Get your deposit address to add funds\n' +
-                       '`/withdraw <amount>` - Withdraw funds to your verified wallet\n' +
-                       '`/balance` - View balance, stats, and transaction history'
+                       '`/balance` - View balance, stats, and transaction history\n' +
+                       '`/withdraw <amount>` - Withdraw funds to your verified wallet'
             },
             {
                 name: '🎮 Wager Commands',

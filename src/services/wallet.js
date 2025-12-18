@@ -11,11 +11,17 @@ class WalletService {
      * Generate unique deposit address for user
      * @param {string} discordId - Discord user ID
      * @returns {string} Unique deposit address
+     * 
+     * WARNING: This implementation is for DEVELOPMENT/TESTING ONLY.
+     * In production, you MUST implement proper wallet generation using:
+     * - ethers.js or web3.js for secure key generation
+     * - Hardware Security Modules (HSM) for key storage
+     * - Proper derivation paths (BIP32/BIP44)
+     * - Secure key management practices
      */
     generateDepositAddress(discordId) {
-        // In production, this would generate an actual wallet address using
-        // proper cryptographic key generation (e.g., ethers.js Wallet.createRandom())
-        // For now, create a deterministic address based on discord ID and master seed
+        // DEVELOPMENT ONLY: Creates deterministic fake addresses for testing
+        // These are NOT real Ethereum addresses and cannot receive actual funds
         
         const masterSeed = process.env.MASTER_WALLET_PRIVATE_KEY || 'development-seed-do-not-use-in-production';
         const hash = crypto.createHash('sha256')
@@ -99,8 +105,39 @@ class WalletService {
             const fee = totalPot * PLATFORM_FEE;
             const winnings = totalPot - fee;
 
-            // Winner gets their winnings (released from hold + opponent's stake)
-            walletOps.winFunds(winnerId, winnings, wagerId, `Wager #${wagerId} - won ${winnings.toFixed(4)} ETH`);
+            // Release winner's held funds and add total winnings
+            // This is done in a transaction to ensure atomicity
+            const { db } = require('./database');
+            const transaction = db.transaction(() => {
+                // First release the winner's held stake
+                const releaseStmt = db.prepare(`
+                    UPDATE user_wallets 
+                    SET available_balance = available_balance + ?,
+                        held_balance = held_balance - ?
+                    WHERE discord_id = ?
+                `);
+                releaseStmt.run(amount, amount, winnerId);
+                
+                // Then add the net winnings (total payout minus their original stake)
+                const winningsAmount = winnings - amount;
+                const updateStmt = db.prepare(`
+                    UPDATE user_wallets 
+                    SET available_balance = available_balance + ?,
+                        total_won = total_won + ?
+                    WHERE discord_id = ?
+                `);
+                updateStmt.run(winningsAmount, winningsAmount, winnerId);
+
+                // Record combined transaction
+                const txStmt = db.prepare(`
+                    INSERT INTO wallet_transactions 
+                    (discord_id, type, amount, wager_id, description) 
+                    VALUES (?, ?, ?, ?, ?)
+                `);
+                txStmt.run(winnerId, 'wager_win', winnings, wagerId, `Wager #${wagerId} - won ${winnings.toFixed(4)} ETH`);
+            });
+            
+            transaction();
             
             // Loser loses their held funds
             walletOps.loseFunds(loserId, amount, wagerId, `Wager #${wagerId} - lost ${amount} ETH`);

@@ -639,7 +639,7 @@ const walletOps = {
     holdFunds(discordId, amount, wagerId, description = 'Wager hold') {
         const transaction = db.transaction(() => {
             // Check if sufficient balance
-            const wallet = this.get(discordId);
+            const wallet = walletOps.get(discordId);
             if (!wallet || wallet.available_balance < amount) {
                 throw new Error('Insufficient balance');
             }
