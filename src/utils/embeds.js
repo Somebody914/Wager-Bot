@@ -143,7 +143,13 @@ function createHelpEmbed() {
                 name: '🔗 Account Management',
                 value: '`/verify <wallet>` - Link your Discord to an ETH wallet\n' +
                        '`/link <game> <username>` - Link a gaming account\n' +
-                       '`/balance` - Check your escrow balance'
+                       '`/balance` - Check your wallet balance and stats'
+            },
+            {
+                name: '💰 Wallet Commands',
+                value: '`/deposit` - Get your deposit address to add funds\n' +
+                       '`/withdraw <amount>` - Withdraw funds to your verified wallet\n' +
+                       '`/balance` - View balance, stats, and transaction history'
             },
             {
                 name: '🎮 Wager Commands',
@@ -179,11 +185,13 @@ function createHelpEmbed() {
             },
             {
                 name: '💡 Tips',
-                value: '• Wagers require 3% platform fee\n' +
-                       '• Winner receives 97% of total pot\n' +
+                value: '• Deposit funds once, use for all wagers\n' +
+                       '• Funds held automatically when creating/accepting wagers\n' +
+                       '• Winner receives 97% of total pot (3% platform fee)\n' +
                        '• Custom matches need proof URLs\n' +
                        '• Disputes can be voted on by community\n' +
-                       '• Moderators resolve contested disputes'
+                       '• Moderators resolve contested disputes\n' +
+                       '• Withdraw unused funds anytime'
             }
         )
         .setTimestamp();
