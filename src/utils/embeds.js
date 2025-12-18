@@ -1,9 +1,9 @@
 const { EmbedBuilder } = require('discord.js');
-const { COLORS, PLATFORM_FEE } = require('./constants');
+const { COLORS, calculatePayout, calculateFee } = require('./constants');
 
 function createWagerEmbed(wager, creator, opponent = null) {
-    const fee = (wager.amount * PLATFORM_FEE).toFixed(4);
-    const payout = (wager.amount * 2 * (1 - PLATFORM_FEE)).toFixed(4);
+    const fee = calculateFee(wager.amount).toFixed(4);
+    const payout = calculatePayout(wager.amount).toFixed(4);
 
     const teamSize = wager.team_size || 1;
     const wagerType = wager.wager_type || 'solo';
@@ -42,8 +42,8 @@ function createWagerEmbed(wager, creator, opponent = null) {
 }
 
 function createMatchResultEmbed(wager, winner, loser) {
-    const fee = (wager.amount * PLATFORM_FEE).toFixed(4);
-    const payout = (wager.amount * 2 * (1 - PLATFORM_FEE)).toFixed(4);
+    const fee = calculateFee(wager.amount).toFixed(4);
+    const payout = calculatePayout(wager.amount).toFixed(4);
 
     const embed = new EmbedBuilder()
         .setTitle(`🏆 Match Result - ${wager.game}`)

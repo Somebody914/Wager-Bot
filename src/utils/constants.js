@@ -102,6 +102,15 @@ function isValidProofUrl(url) {
     return false;
 }
 
+// Payout calculation helper
+function calculatePayout(amount) {
+    return amount * 2 * (1 - PLATFORM_FEE);
+}
+
+function calculateFee(amount) {
+    return amount * PLATFORM_FEE;
+}
+
 module.exports = {
     GAMES,
     GAME_CHOICES,
@@ -112,5 +121,7 @@ module.exports = {
     WAGER_STATUS,
     PLATFORM_FEE,
     COLORS,
-    isValidProofUrl
+    isValidProofUrl,
+    calculatePayout,
+    calculateFee
 };

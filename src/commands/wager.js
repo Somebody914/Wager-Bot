@@ -1,7 +1,7 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { userOps, wagerOps, disputeOps, teamOps, participantOps, disputeVoteOps } = require('../services/database');
 const { createWagerEmbed, createErrorEmbed, createSuccessEmbed } = require('../utils/embeds');
-const { GAME_CHOICES, PLATFORM_FEE, TEAM_SIZES, WAGER_TYPES, MATCH_TYPE_CHOICES, isValidProofUrl } = require('../utils/constants');
+const { GAME_CHOICES, PLATFORM_FEE, TEAM_SIZES, WAGER_TYPES, MATCH_TYPE_CHOICES, isValidProofUrl, calculatePayout, calculateFee } = require('../utils/constants');
 const { sendWagerAlert, notifyWagerAccepted, notifyWagerSubmitted, notifyWagerCompleted, notifyDispute, sendMatchResult, sendDisputeAlert } = require('../services/notifications');
 
 module.exports = {
@@ -235,8 +235,8 @@ async function handleCreate(interaction) {
 
     const wager = wagerOps.get(wagerId);
     const gameName = GAME_CHOICES.find(g => g.value === game)?.name || game;
-    const fee = (amount * PLATFORM_FEE).toFixed(4);
-    const payout = (amount * 2 * (1 - PLATFORM_FEE)).toFixed(4);
+    const fee = calculateFee(amount).toFixed(4);
+    const payout = calculatePayout(amount).toFixed(4);
 
     // Get match type display name
     const matchTypeDisplay = MATCH_TYPE_CHOICES.find(mt => mt.value === matchType)?.name || matchType;
@@ -401,12 +401,12 @@ async function handleSubmit(interaction) {
             return interaction.reply({ embeds: [embed], ephemeral: true });
         }
     } else {
-        // Ranked/competitive matches should have match_id for API verification
+        // Ranked/competitive matches: prefer match_id for API verification, but allow proof_url as fallback
         if (!matchId && !proofUrl) {
             const embed = createErrorEmbed(
                 'Match ID or proof URL required!\n\n' +
-                'For ranked/competitive matches, provide a match_id for API verification.\n' +
-                'Alternatively, provide a proof_url.'
+                '**Preferred**: Provide match_id for automatic API verification (Valorant, LoL).\n' +
+                '**Alternative**: Provide proof_url for manual verification.'
             );
             return interaction.reply({ embeds: [embed], ephemeral: true });
         }
@@ -445,7 +445,7 @@ async function handleSubmit(interaction) {
             const loserId = interaction.user.id === wager.creator_id ? wager.opponent_id : wager.creator_id;
             
             // Update balances
-            const payout = wager.amount * 2 * (1 - PLATFORM_FEE);
+            const payout = calculatePayout(wager.amount);
             userOps.updateBalance(interaction.user.id, payout);
             
             // Send notifications

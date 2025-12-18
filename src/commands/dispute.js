@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const { userOps, wagerOps, disputeOps, disputeVoteOps } = require('../services/database');
 const { createErrorEmbed, createSuccessEmbed, createDisputeEmbed } = require('../utils/embeds');
-const { isValidProofUrl } = require('../utils/constants');
+const { isValidProofUrl, calculatePayout } = require('../utils/constants');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -278,8 +278,7 @@ async function handleResolve(interaction) {
         disputeOps.resolve(disputeId, 'resolved');
 
         // Update balances
-        const { PLATFORM_FEE } = require('../utils/constants');
-        const payout = wager.amount * 2 * (1 - PLATFORM_FEE);
+        const payout = calculatePayout(wager.amount);
         userOps.updateBalance(winnerId, payout);
 
         const embed = createSuccessEmbed(
