@@ -63,6 +63,22 @@ const WAGER_STATUS = {
     CANCELLED: 'cancelled'
 };
 
+// Escrow statuses
+const ESCROW_STATUS = {
+    AWAITING_DEPOSITS: 'awaiting_deposits',
+    FUNDED: 'funded',
+    LOCKED: 'locked',
+    RELEASED: 'released',
+    REFUNDED: 'refunded'
+};
+
+// Transaction types
+const TRANSACTION_TYPES = {
+    DEPOSIT: 'deposit',
+    RELEASE: 'release',
+    REFUND: 'refund'
+};
+
 // Platform fee percentage
 const PLATFORM_FEE = 0.03; // 3%
 
@@ -127,6 +143,8 @@ module.exports = {
     MATCH_TYPES,
     MATCH_TYPE_CHOICES,
     WAGER_STATUS,
+    ESCROW_STATUS,
+    TRANSACTION_TYPES,
     PLATFORM_FEE,
     COLORS,
     isValidProofUrl,

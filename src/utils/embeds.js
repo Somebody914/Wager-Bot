@@ -207,6 +207,70 @@ function createSuccessEmbed(message) {
         .setTimestamp();
 }
 
+function createEscrowEmbed(escrowAccount, transactions) {
+    const statusEmoji = {
+        'awaiting_deposits': '⏳',
+        'funded': '✅',
+        'locked': '🔒',
+        'released': '💰',
+        'refunded': '↩️'
+    };
+
+    const embed = new EmbedBuilder()
+        .setTitle('🔐 Escrow Status')
+        .setColor(COLORS.INFO)
+        .addFields(
+            { name: 'Wager ID', value: `#${escrowAccount.wagerId}`, inline: true },
+            { name: 'Status', value: `${statusEmoji[escrowAccount.status] || '❓'} ${escrowAccount.status.toUpperCase()}`, inline: true },
+            { name: 'Escrow Address', value: `\`${escrowAccount.escrowAddress}\``, inline: false },
+            { name: 'Creator Deposited', value: escrowAccount.creatorDeposited ? '✅ Yes' : '❌ No', inline: true },
+            { name: 'Opponent Deposited', value: escrowAccount.opponentDeposited ? '✅ Yes' : '❌ No', inline: true },
+            { name: 'Total Amount', value: `${escrowAccount.totalAmount} ETH`, inline: true }
+        );
+
+    if (transactions && transactions.length > 0) {
+        const txList = transactions.slice(0, 5).map(tx => {
+            const typeEmoji = tx.transaction_type === 'deposit' ? '📥' : tx.transaction_type === 'release' ? '📤' : '↩️';
+            return `${typeEmoji} ${tx.transaction_type.toUpperCase()} - ${tx.amount} ETH (${tx.status})`;
+        }).join('\n');
+        
+        embed.addFields({ name: 'Recent Transactions', value: txList || 'No transactions yet' });
+    }
+
+    embed.setTimestamp()
+        .setFooter({ text: 'Secure Escrow System' });
+
+    return embed;
+}
+
+function createDepositInstructionsEmbed(wagerId, escrowAddress, amount) {
+    const embed = new EmbedBuilder()
+        .setTitle('💳 Deposit Instructions')
+        .setColor(COLORS.PRIMARY)
+        .setDescription(
+            `To participate in this wager, you must deposit **${amount} ETH** into the escrow account.\n\n` +
+            `**How to deposit:**\n` +
+            `1. Send **exactly ${amount} ETH** to the escrow address below\n` +
+            `2. Copy your transaction hash after sending\n` +
+            `3. Use \`/escrow deposit ${wagerId} <tx_hash>\` to submit proof\n` +
+            `4. Wait for verification\n\n` +
+            `⚠️ **Important:**\n` +
+            `• Only send from your verified wallet address\n` +
+            `• Send the exact amount (${amount} ETH)\n` +
+            `• Keep your transaction hash for verification\n` +
+            `• Do not share your private keys with anyone`
+        )
+        .addFields(
+            { name: '🔐 Escrow Address', value: `\`${escrowAddress}\``, inline: false },
+            { name: '💰 Required Amount', value: `${amount} ETH`, inline: true },
+            { name: '🎮 Wager ID', value: `#${wagerId}`, inline: true }
+        )
+        .setTimestamp()
+        .setFooter({ text: 'Secure Escrow System - Your funds are safe' });
+
+    return embed;
+}
+
 module.exports = {
     createWagerEmbed,
     createMatchResultEmbed,
@@ -215,5 +279,7 @@ module.exports = {
     createLeaderboardEmbed,
     createHelpEmbed,
     createErrorEmbed,
-    createSuccessEmbed
+    createSuccessEmbed,
+    createEscrowEmbed,
+    createDepositInstructionsEmbed
 };

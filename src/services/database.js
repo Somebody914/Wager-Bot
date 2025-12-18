@@ -165,6 +165,39 @@ function initializeDatabase() {
         )
     `);
 
+    // Escrow accounts table
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS escrow_accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            wager_id INTEGER UNIQUE NOT NULL,
+            escrow_address TEXT NOT NULL,
+            creator_deposited INTEGER DEFAULT 0,
+            opponent_deposited INTEGER DEFAULT 0,
+            total_amount REAL DEFAULT 0,
+            status TEXT DEFAULT 'awaiting_deposits',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (wager_id) REFERENCES wagers(id)
+        )
+    `);
+
+    // Escrow transactions table
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS escrow_transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            wager_id INTEGER NOT NULL,
+            user_id TEXT NOT NULL,
+            transaction_type TEXT NOT NULL,
+            amount REAL NOT NULL,
+            tx_hash TEXT,
+            status TEXT DEFAULT 'pending',
+            escrow_address TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            confirmed_at DATETIME,
+            FOREIGN KEY (wager_id) REFERENCES wagers(id),
+            FOREIGN KEY (user_id) REFERENCES users(discord_id)
+        )
+    `);
+
     console.log('✅ Database initialized successfully');
 }
 
@@ -276,6 +309,11 @@ const wagerOps = {
     getUserWagers(discordId) {
         const stmt = db.prepare('SELECT * FROM wagers WHERE creator_id = ? OR opponent_id = ? ORDER BY created_at DESC');
         return stmt.all(discordId, discordId);
+    },
+
+    updateStatus(wagerId, status) {
+        const stmt = db.prepare('UPDATE wagers SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+        return stmt.run(status, wagerId);
     }
 };
 
@@ -459,6 +497,69 @@ const participantOps = {
     }
 };
 
+// Escrow operations
+const escrowOps = {
+    createAccount(wagerId, escrowAddress) {
+        const stmt = db.prepare(`
+            INSERT INTO escrow_accounts (wager_id, escrow_address, status) 
+            VALUES (?, ?, ?)
+        `);
+        const result = stmt.run(wagerId, escrowAddress, 'awaiting_deposits');
+        return result.lastInsertRowid;
+    },
+
+    recordDeposit(wagerId, userId, amount, txHash) {
+        // Record transaction
+        const stmt = db.prepare(`
+            INSERT INTO escrow_transactions 
+            (wager_id, user_id, transaction_type, amount, tx_hash, status) 
+            VALUES (?, ?, ?, ?, ?, ?)
+        `);
+        const result = stmt.run(wagerId, userId, 'deposit', amount, txHash, 'confirmed');
+        
+        // Update total amount in escrow account
+        const updateStmt = db.prepare(`
+            UPDATE escrow_accounts 
+            SET total_amount = total_amount + ? 
+            WHERE wager_id = ?
+        `);
+        updateStmt.run(amount, wagerId);
+        
+        return result.lastInsertRowid;
+    },
+
+    recordTransaction(wagerId, userId, transactionType, amount, txHash, status) {
+        const stmt = db.prepare(`
+            INSERT INTO escrow_transactions 
+            (wager_id, user_id, transaction_type, amount, tx_hash, status) 
+            VALUES (?, ?, ?, ?, ?, ?)
+        `);
+        const result = stmt.run(wagerId, userId, transactionType, amount, txHash, status);
+        return result.lastInsertRowid;
+    },
+
+    getAccount(wagerId) {
+        const stmt = db.prepare('SELECT * FROM escrow_accounts WHERE wager_id = ?');
+        return stmt.get(wagerId);
+    },
+
+    getTransactions(wagerId) {
+        const stmt = db.prepare('SELECT * FROM escrow_transactions WHERE wager_id = ? ORDER BY created_at DESC');
+        return stmt.all(wagerId);
+    },
+
+    updateStatus(wagerId, status) {
+        const stmt = db.prepare('UPDATE escrow_accounts SET status = ? WHERE wager_id = ?');
+        return stmt.run(status, wagerId);
+    },
+
+    markDeposited(wagerId, side) {
+        const column = side === 'creator' ? 'creator_deposited' : 'opponent_deposited';
+        const stmt = db.prepare(`UPDATE escrow_accounts SET ${column} = 1 WHERE wager_id = ?`);
+        return stmt.run(wagerId);
+    }
+};
+
 module.exports = {
     initializeDatabase,
     userOps,
@@ -469,5 +570,6 @@ module.exports = {
     statsOps,
     teamOps,
     participantOps,
+    escrowOps,
     db
 };

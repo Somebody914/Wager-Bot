@@ -2,6 +2,11 @@ const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const { userOps, wagerOps, disputeOps, disputeVoteOps } = require('../services/database');
 const { createErrorEmbed, createSuccessEmbed, createDisputeEmbed } = require('../utils/embeds');
 const { isValidProofUrl, calculatePayout } = require('../utils/constants');
+const EscrowService = require('../services/escrow');
+const db = require('../services/database');
+
+// Initialize escrow service
+const escrowService = new EscrowService(db);
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -235,12 +240,20 @@ async function handleResolve(interaction) {
         wagerOps.cancel(dispute.wager_id);
         disputeOps.resolve(disputeId, 'resolved');
 
+        // Refund escrow funds to both parties
+        try {
+            escrowService.refundFunds(dispute.wager_id);
+        } catch (error) {
+            console.error('Error refunding escrow funds:', error);
+        }
+
         const embed = createSuccessEmbed(
             `✅ Dispute resolved - Wager cancelled!\n\n` +
             `**Dispute ID:** ${disputeId}\n` +
             `**Wager ID:** ${dispute.wager_id}\n` +
             `**Decision:** Wager cancelled\n` +
             `**Reason:** ${reason}\n\n` +
+            `💰 **Escrow funds have been refunded** to both parties.\n\n` +
             `Both parties have been notified.`
         );
 
@@ -252,7 +265,8 @@ async function handleResolve(interaction) {
             await creator.send(
                 `⚖️ **Dispute Resolved**\n\n` +
                 `Wager #${dispute.wager_id} has been cancelled by a moderator.\n` +
-                `Reason: ${reason}`
+                `Reason: ${reason}\n\n` +
+                `💰 Your deposit has been refunded from escrow.`
             );
         } catch (error) {
             console.error('Error notifying creator:', error);
@@ -263,7 +277,8 @@ async function handleResolve(interaction) {
             await opponent.send(
                 `⚖️ **Dispute Resolved**\n\n` +
                 `Wager #${dispute.wager_id} has been cancelled by a moderator.\n` +
-                `Reason: ${reason}`
+                `Reason: ${reason}\n\n` +
+                `💰 Your deposit has been refunded from escrow.`
             );
         } catch (error) {
             console.error('Error notifying opponent:', error);
@@ -277,6 +292,13 @@ async function handleResolve(interaction) {
         wagerOps.complete(dispute.wager_id, winnerId);
         disputeOps.resolve(disputeId, 'resolved');
 
+        // Release escrow funds to winner
+        try {
+            escrowService.releaseFunds(dispute.wager_id, winnerId);
+        } catch (error) {
+            console.error('Error releasing escrow funds:', error);
+        }
+
         // Update balances
         const payout = calculatePayout(wager.amount);
         userOps.updateBalance(winnerId, payout);
@@ -288,6 +310,7 @@ async function handleResolve(interaction) {
             `**Winner:** <@${winnerId}>\n` +
             `**Payout:** ${payout.toFixed(4)} ETH\n` +
             `**Reason:** ${reason}\n\n` +
+            `💰 **Escrow funds have been released** to the winner.\n\n` +
             `Both parties have been notified.`
         );
 
@@ -300,7 +323,8 @@ async function handleResolve(interaction) {
                 `🏆 **Dispute Resolved - You Won!**\n\n` +
                 `Wager #${dispute.wager_id} has been resolved in your favor.\n` +
                 `Payout: ${payout.toFixed(4)} ETH\n` +
-                `Reason: ${reason}`
+                `Reason: ${reason}\n\n` +
+                `💰 Escrow funds have been released to your wallet.`
             );
         } catch (error) {
             console.error('Error notifying winner:', error);
@@ -311,7 +335,8 @@ async function handleResolve(interaction) {
             await loserUser.send(
                 `❌ **Dispute Resolved - You Lost**\n\n` +
                 `Wager #${dispute.wager_id} has been resolved against you.\n` +
-                `Reason: ${reason}`
+                `Reason: ${reason}\n\n` +
+                `💰 Escrow funds have been released to the winner.`
             );
         } catch (error) {
             console.error('Error notifying loser:', error);
