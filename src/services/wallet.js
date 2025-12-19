@@ -126,7 +126,8 @@ class WalletService {
     _getNextDerivationIndex() {
         const stmt = db.prepare('SELECT MAX(derivation_index) as max_index FROM user_wallets');
         const result = stmt.get();
-        return (result.max_index || -1) + 1;
+        const maxIndex = result && result.max_index !== null ? result.max_index : -1;
+        return maxIndex + 1;
     }
 
     /**

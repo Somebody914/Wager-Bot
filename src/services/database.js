@@ -287,6 +287,8 @@ function initializeDatabase() {
             total_withdrawn REAL DEFAULT 0,
             total_won REAL DEFAULT 0,
             total_lost REAL DEFAULT 0,
+            derivation_index INTEGER,
+            last_checked_block INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (discord_id) REFERENCES users(discord_id)
         )
