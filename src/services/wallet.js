@@ -66,8 +66,8 @@ class WalletService {
 
         // Use BIP44 derivation path: m/44'/60'/0'/0/{index}
         // 60 is the coin type for Ethereum
-        const path = `m/44'/60'/0'/0/${derivationIndex}`;
-        const childWallet = this.hdNode.derivePath(path);
+        // Since HDNodeWallet.fromPhrase creates at m/44'/60'/0'/0, we derive relative path
+        const childWallet = this.hdNode.deriveChild(derivationIndex);
         
         console.log(`✅ Generated real deposit address for user ${discordId}: ${childWallet.address}`);
         return childWallet.address;
@@ -83,8 +83,7 @@ class WalletService {
         if (!this.hdNode) {
             return null;
         }
-        const path = `m/44'/60'/0'/0/${derivationIndex}`;
-        const childWallet = this.hdNode.derivePath(path);
+        const childWallet = this.hdNode.deriveChild(derivationIndex);
         return childWallet.privateKey;
     }
 

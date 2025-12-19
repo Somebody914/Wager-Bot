@@ -107,73 +107,117 @@ class DepositMonitorService {
         const address = wallet.deposit_address;
         const lastCheckedBlock = wallet.last_checked_block || 0;
 
-        // Get transaction history for this address
-        // Note: This is a simplified approach. In production, you might want to use
-        // event logs or a more efficient method like tracking specific blocks
-        const balance = await this.provider.getBalance(address);
-        
-        // If balance is greater than 0 and we haven't processed it yet
-        if (balance > 0n) {
-            // Get transaction history
-            // For simplicity, we'll check if there's a balance and if it's new
-            const balanceEth = parseFloat(ethers.formatEther(balance));
-            
-            // Check if this is a new deposit (balance changed since last check)
-            if (lastCheckedBlock < currentBlock) {
-                // Get transactions for this address
-                // Note: ethers.js doesn't provide a direct way to get transaction history
-                // In production, you'd use Etherscan API or similar service
-                await this.processNewBalance(wallet, balanceEth, currentBlock);
-            }
+        // Skip if we're already up to date
+        if (lastCheckedBlock >= currentBlock - this.requiredConfirmations) {
+            return;
         }
 
-        // Update last checked block
+        try {
+            // Get current balance
+            const balance = await this.provider.getBalance(address);
+            const balanceEth = parseFloat(ethers.formatEther(balance));
+            
+            // If balance is greater than minimum deposit
+            if (balanceEth >= this.minDepositEth) {
+                // Check if we need to scan for new transactions
+                // In a real implementation, you would:
+                // 1. Use Etherscan API or similar to get transaction history
+                // 2. Filter transactions from lastCheckedBlock to currentBlock
+                // 3. Process each incoming transaction
+                
+                // For now, we'll use a simpler approach: check if balance increased
+                const startBlock = Math.max(0, lastCheckedBlock);
+                const endBlock = currentBlock - this.requiredConfirmations;
+                
+                if (endBlock > startBlock) {
+                    // Scan for transactions in this block range
+                    await this.scanBlockRange(wallet, address, startBlock, endBlock, balanceEth);
+                }
+            }
+        } catch (error) {
+            console.error(`Error checking wallet ${address}:`, error.message);
+        }
+
+        // Update last checked block (with confirmations buffer)
         const updateStmt = db.prepare('UPDATE user_wallets SET last_checked_block = ? WHERE discord_id = ?');
-        updateStmt.run(currentBlock, wallet.discord_id);
+        updateStmt.run(currentBlock - this.requiredConfirmations, wallet.discord_id);
     }
 
     /**
-     * Process a new balance for a wallet
+     * Scan a block range for transactions to a specific address
+     * Note: This is a basic implementation. In production, use Etherscan API or similar
      * @param {Object} wallet - Wallet database record
-     * @param {number} balanceEth - Current balance in ETH
-     * @param {number} blockNumber - Block number of the transaction
+     * @param {string} address - Ethereum address to monitor
+     * @param {number} startBlock - Start block number
+     * @param {number} endBlock - End block number
+     * @param {number} currentBalance - Current balance in ETH
      */
-    async processNewBalance(wallet, balanceEth, blockNumber) {
-        // Check minimum deposit
-        if (balanceEth < this.minDepositEth) {
-            console.log(`⚠️  Balance ${balanceEth} ETH for ${wallet.discord_id} below minimum`);
-            return;
+    async scanBlockRange(wallet, address, startBlock, endBlock, currentBalance) {
+        // This is a simplified implementation
+        // In production, you should use Etherscan API or run your own archive node
+        // to efficiently get transaction history
+        
+        // For basic functionality, we'll compare expected balance with actual balance
+        const stmt = db.prepare(`
+            SELECT SUM(amount) as total_deposited 
+            FROM wallet_transactions 
+            WHERE discord_id = ? AND type = 'deposit'
+        `).get(wallet.discord_id);
+        
+        const knownDeposits = stmt?.total_deposited || 0;
+        const expectedBalance = knownDeposits - (wallet.total_withdrawn || 0);
+        
+        // If current balance is higher than expected, there's a new deposit
+        if (currentBalance > expectedBalance && currentBalance >= this.minDepositEth) {
+            const newDepositAmount = currentBalance - expectedBalance;
+            
+            // Only process if the new amount is significant
+            if (newDepositAmount >= this.minDepositEth) {
+                await this.processNewDeposit(wallet, newDepositAmount, endBlock, address);
+            }
         }
+    }
 
-        // Check if we've already processed this deposit
-        const existingTx = db.prepare(`
+    /**
+     * Process a newly detected deposit
+     * @param {Object} wallet - Wallet database record
+     * @param {number} amount - Deposit amount in ETH
+     * @param {number} blockNumber - Block number where deposit was confirmed
+     * @param {string} address - Deposit address
+     */
+    async processNewDeposit(wallet, amount, blockNumber, address) {
+        // Check if we've already processed a similar deposit recently
+        const recentTx = db.prepare(`
             SELECT * FROM wallet_transactions 
-            WHERE discord_id = ? AND type = 'deposit' AND amount = ?
-            ORDER BY created_at DESC LIMIT 1
-        `).get(wallet.discord_id, balanceEth);
+            WHERE discord_id = ? AND type = 'deposit' 
+            AND ABS(amount - ?) < 0.0001
+            AND created_at > datetime('now', '-1 hour')
+        `).get(wallet.discord_id, amount);
 
-        if (existingTx) {
-            // Already processed this amount
+        if (recentTx) {
+            console.log(`⚠️  Similar deposit already processed for ${wallet.discord_id}`);
             return;
         }
 
-        // Generate a pseudo tx hash for tracking (in production, get real tx hash)
-        const txHash = `0x${Date.now().toString(16)}${wallet.discord_id.slice(0, 16)}`;
+        // Generate a transaction reference
+        const txRef = `deposit_${blockNumber}_${address.slice(0, 10)}`;
 
-        console.log(`💰 New deposit detected: ${balanceEth} ETH for user ${wallet.discord_id}`);
+        console.log(`💰 New deposit detected: ${amount.toFixed(4)} ETH for user ${wallet.discord_id}`);
 
-        // Credit the user's balance
         try {
-            walletOps.addFunds(wallet.discord_id, balanceEth, txHash, `Deposit of ${balanceEth} ETH`);
+            // Credit the user's balance
+            walletOps.addFunds(wallet.discord_id, amount, txRef, `Deposit of ${amount.toFixed(4)} ETH (Block ${blockNumber})`);
             
             // Notify user via DM
-            await this.notifyUserOfDeposit(wallet.discord_id, balanceEth, txHash);
+            await this.notifyUserOfDeposit(wallet.discord_id, amount, txRef);
             
-            console.log(`✅ Credited ${balanceEth} ETH to ${wallet.discord_id}`);
+            console.log(`✅ Credited ${amount.toFixed(4)} ETH to ${wallet.discord_id}`);
         } catch (error) {
             console.error(`❌ Failed to credit deposit for ${wallet.discord_id}:`, error.message);
         }
     }
+
+
 
     /**
      * Notify user of confirmed deposit via Discord DM
