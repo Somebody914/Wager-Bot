@@ -24,11 +24,14 @@ A comprehensive Discord bot for managing crypto gaming wagers on the Wager platf
 - Automatic "Verified" role assignment
 - Channel moderation for wager-alerts and disputes channels
 
-### 💰 Simplified Wallet System
+### 💰 Real Ethereum Wallet System
+- **Real ETH Deposits**: Each user gets a unique Ethereum address for deposits
+- **HD Wallet Generation**: BIP44/BIP32 hierarchical deterministic wallet derivation
+- **Automatic Deposit Detection**: Blockchain monitoring service detects and credits deposits
+- **Real On-Chain Withdrawals**: Actual ETH transfers to your verified wallet
 - **Pre-Funded Balance**: Deposit funds once, use for all wagers
 - **Instant Wager Creation**: Funds automatically held when creating/accepting wagers
 - **Automatic Payouts**: Winners receive payouts automatically to their balance
-- **Easy Withdrawals**: Withdraw unused funds anytime to your verified wallet
 - **Transaction History**: Track all deposits, wagers, wins, losses, and withdrawals
 - **Real-Time Balance**: View available balance, held balance, and total at any time
 
@@ -106,6 +109,10 @@ A comprehensive Discord bot for managing crypto gaming wagers on the Wager platf
 ### Statistics
 - `/stats [@user]` - View user statistics
 - `/leaderboard [game]` - View top players
+
+### Admin Commands (Administrator Only)
+- `/admin wallet-balance` - Check hot wallet ETH balance
+- `/admin system-status` - View system configuration and health status
 
 ### Help
 - `/help` - Show all available commands
@@ -233,12 +240,23 @@ RIOT_API_KEY=your_riot_api_key
 STEAM_API_KEY=your_steam_api_key
 TRACKER_API_KEY=your_tracker_gg_api_key
 
-# Wallet Configuration (NEW - Simplified Balance System)
-MASTER_WALLET_PRIVATE_KEY=your_private_key_here
-BLOCKCHAIN_RPC_URL=https://mainnet.infura.io/v3/YOUR_KEY
-DEPOSIT_CONFIRMATION_BLOCKS=3
-MIN_DEPOSIT=0.001
+# Ethereum Configuration (Real Blockchain Integration)
+ETHEREUM_RPC_URL=https://mainnet.infura.io/v3/YOUR_PROJECT_ID
+MASTER_WALLET_PRIVATE_KEY=your_master_wallet_private_key_here
+MASTER_WALLET_ADDRESS=0x_your_master_wallet_address_here
+HD_WALLET_MNEMONIC=your_twelve_word_mnemonic_phrase_here
+
+# Deposit Monitoring
+DEPOSIT_CHECK_INTERVAL_MS=60000
+REQUIRED_CONFIRMATIONS=12
+MIN_DEPOSIT_ETH=0.001
+
+# Withdrawal Configuration
 MIN_WITHDRAWAL=0.005
+MAX_GAS_PRICE_GWEI=100
+
+# Network Selection (mainnet or sepolia for testing)
+NETWORK=mainnet
 ```
 
 **Required Variables:**
@@ -250,12 +268,23 @@ MIN_WITHDRAWAL=0.005
 - `DISPUTES_CHANNEL` - Channel ID where disputes will be posted
 - `VERIFIED_ROLE_ID` - Role ID for verified users
 
-**Wallet Configuration (NEW):**
-- `MASTER_WALLET_PRIVATE_KEY` - Private key for the master wallet (keep secure!)
-- `BLOCKCHAIN_RPC_URL` - RPC URL for blockchain connection (e.g., Infura)
-- `DEPOSIT_CONFIRMATION_BLOCKS` - Number of confirmations required for deposits (default: 3)
-- `MIN_DEPOSIT` - Minimum deposit amount in ETH (default: 0.001)
-- `MIN_WITHDRAWAL` - Minimum withdrawal amount in ETH (default: 0.005)
+**Ethereum Configuration (CRITICAL for Production):**
+- `ETHEREUM_RPC_URL` - RPC endpoint for Ethereum (Infura, Alchemy, or public RPC)
+  - Get free API key from [Infura](https://infura.io) or [Alchemy](https://alchemy.com)
+- `MASTER_WALLET_PRIVATE_KEY` - Private key for hot wallet that sends withdrawals (KEEP SECURE!)
+  - This wallet needs ETH for gas fees and user withdrawals
+- `MASTER_WALLET_ADDRESS` - Public address of the master wallet
+- `HD_WALLET_MNEMONIC` - 12-word mnemonic phrase for generating user deposit addresses
+  - Generate using: `node -e "console.log(require('ethers').Wallet.createRandom().mnemonic.phrase)"`
+  - **NEVER share this phrase!** It controls all user deposit addresses
+
+**Deposit & Withdrawal Settings:**
+- `DEPOSIT_CHECK_INTERVAL_MS` - How often to check for deposits (default: 60000ms = 1 minute)
+- `REQUIRED_CONFIRMATIONS` - Block confirmations before crediting deposit (default: 12 blocks)
+- `MIN_DEPOSIT_ETH` - Minimum deposit amount (default: 0.001 ETH)
+- `MIN_WITHDRAWAL` - Minimum withdrawal amount (default: 0.005 ETH)
+- `MAX_GAS_PRICE_GWEI` - Maximum gas price for withdrawals (default: 100 gwei)
+- `NETWORK` - Network to use: `mainnet` (real ETH) or `sepolia` (testnet)
 
 **Optional Variables (for enhanced features):**
 - `MODERATION_ENABLED` - Enable/disable channel moderation (default: false)
@@ -565,11 +594,45 @@ During development, set `GUILD_ID` in `.env` to your test server's ID. This make
 
 ## Security Notes
 
-- Never commit your `.env` file to version control
+### Critical Security Requirements
+- **NEVER commit your `.env` file to version control**
+- **NEVER share or expose these sensitive values:**
+  - `MASTER_WALLET_PRIVATE_KEY` - Controls the hot wallet with real funds
+  - `HD_WALLET_MNEMONIC` - Controls all user deposit addresses
+  - `DISCORD_TOKEN` - Controls your Discord bot
 - Keep your bot token secret
 - Regularly update dependencies for security patches
-- In production, implement additional validation for match IDs
-- Consider adding rate limiting for wager creation
+
+### Wallet Security Best Practices
+1. **Hot Wallet Management:**
+   - Keep only necessary ETH in the hot wallet for withdrawals
+   - Store majority of funds in a cold wallet
+   - Monitor hot wallet balance using `/admin wallet-balance`
+   - Set up alerts for low balance or suspicious activity
+
+2. **Private Key Storage:**
+   - Use environment variables, never hardcode keys
+   - Consider using a secrets manager (AWS Secrets Manager, HashiCorp Vault)
+   - For production, consider using a Hardware Security Module (HSM)
+   - Backup your mnemonic phrase securely offline
+
+3. **Gas Price Protection:**
+   - Set reasonable `MAX_GAS_PRICE_GWEI` to prevent excessive gas costs
+   - Monitor Ethereum network conditions
+   - Consider implementing withdrawal queues during high gas periods
+
+4. **Testing:**
+   - **ALWAYS test on Sepolia testnet first** before mainnet
+   - Use `NETWORK=sepolia` in `.env` for testing
+   - Get free Sepolia ETH from faucets
+   - Never use real funds for testing
+
+5. **Additional Security:**
+   - Implement rate limiting for withdrawals
+   - Add withdrawal cooldowns or limits per user
+   - Log all blockchain transactions for audit trail
+   - Consider adding multi-signature requirements for large withdrawals
+   - Validate all addresses before sending transactions
 
 ## Contributing
 

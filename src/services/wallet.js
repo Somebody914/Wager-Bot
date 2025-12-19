@@ -1,34 +1,96 @@
 const crypto = require('crypto');
-const { walletOps, userOps } = require('./database');
+const { ethers } = require('ethers');
+const { walletOps, userOps, db } = require('./database');
 const { PLATFORM_FEE } = require('../utils/constants');
 
 /**
  * WalletService - Manages user wallet operations
- * Simple pre-funded wallet balance system
+ * Implements real Ethereum HD wallet generation and blockchain transactions
  */
 class WalletService {
+    constructor() {
+        // Initialize Ethereum provider
+        const rpcUrl = process.env.ETHEREUM_RPC_URL;
+        if (!rpcUrl) {
+            console.warn('⚠️  ETHEREUM_RPC_URL not set. Wallet operations will be limited.');
+            this.provider = null;
+        } else {
+            this.provider = new ethers.JsonRpcProvider(rpcUrl);
+        }
+
+        // Initialize HD wallet from mnemonic
+        const mnemonic = process.env.HD_WALLET_MNEMONIC;
+        if (!mnemonic) {
+            console.warn('⚠️  HD_WALLET_MNEMONIC not set. Using fallback address generation.');
+            this.hdNode = null;
+        } else {
+            try {
+                // Create HD wallet at account level (m/44'/60'/0'/0)
+                // This allows us to derive addresses at m/44'/60'/0'/0/{index}
+                this.hdNode = ethers.HDNodeWallet.fromPhrase(mnemonic, undefined, "m/44'/60'/0'/0");
+            } catch (error) {
+                console.error('❌ Invalid HD_WALLET_MNEMONIC:', error.message);
+                this.hdNode = null;
+            }
+        }
+
+        // Initialize master wallet for withdrawals
+        const masterKey = process.env.MASTER_WALLET_PRIVATE_KEY;
+        if (!masterKey || !this.provider) {
+            console.warn('⚠️  Master wallet not configured. Withdrawals will not work.');
+            this.masterWallet = null;
+        } else {
+            try {
+                this.masterWallet = new ethers.Wallet(masterKey, this.provider);
+                // Log only first and last 6 chars for security
+                const addrShort = `${this.masterWallet.address.slice(0, 6)}...${this.masterWallet.address.slice(-4)}`;
+                console.log(`✅ Master wallet initialized: ${addrShort}`);
+            } catch (error) {
+                console.error('❌ Invalid MASTER_WALLET_PRIVATE_KEY:', error.message);
+                this.masterWallet = null;
+            }
+        }
+    }
+
     /**
-     * Generate unique deposit address for user
+     * Generate unique deposit address for user using BIP44 HD derivation
      * @param {string} discordId - Discord user ID
-     * @returns {string} Unique deposit address
-     * 
-     * WARNING: This implementation is for DEVELOPMENT/TESTING ONLY.
-     * In production, you MUST implement proper wallet generation using:
-     * - ethers.js or web3.js for secure key generation
-     * - Hardware Security Modules (HSM) for key storage
-     * - Proper derivation paths (BIP32/BIP44)
-     * - Secure key management practices
+     * @param {number} derivationIndex - Unique index for this user
+     * @returns {string} Real Ethereum deposit address
      */
-    generateDepositAddress(discordId) {
-        // DEVELOPMENT ONLY: Creates deterministic fake addresses for testing
-        // These are NOT real Ethereum addresses and cannot receive actual funds
+    generateDepositAddress(discordId, derivationIndex) {
+        if (!this.hdNode) {
+            // Fallback to deterministic fake addresses for development
+            console.warn('⚠️  Using fallback address generation (not real addresses)');
+            const hash = crypto.createHash('sha256')
+                .update(`${discordId}-${derivationIndex}`)
+                .digest('hex');
+            return `0x${hash.substring(0, 40)}`;
+        }
+
+        // Use BIP44 derivation path: m/44'/60'/0'/0/{index}
+        // 60 is the coin type for Ethereum
+        // hdNode is at m/44'/60'/0'/0, deriveChild creates m/44'/60'/0'/0/{index}
+        const childWallet = this.hdNode.deriveChild(derivationIndex);
         
-        const masterSeed = process.env.MASTER_WALLET_PRIVATE_KEY || 'development-seed-do-not-use-in-production';
-        const hash = crypto.createHash('sha256')
-            .update(`${masterSeed}-user-${discordId}`)
-            .digest('hex');
-        
-        return `0x${hash.substring(0, 40)}`;
+        // Log without exposing user ID for privacy
+        const addrShort = `${childWallet.address.slice(0, 6)}...${childWallet.address.slice(-4)}`;
+        console.log(`✅ Generated real deposit address (index ${derivationIndex}, path: ${childWallet.path}): ${addrShort}`);
+        return childWallet.address;
+    }
+
+    /**
+     * Get the private key for a user's deposit address (needed for advanced operations)
+     * SECURITY: This should only be used internally and never exposed
+     * @param {number} derivationIndex - User's derivation index
+     * @returns {string|null} Private key or null if not available
+     */
+    _getPrivateKeyForIndex(derivationIndex) {
+        if (!this.hdNode) {
+            return null;
+        }
+        const childWallet = this.hdNode.deriveChild(derivationIndex);
+        return childWallet.privateKey;
     }
 
     /**
@@ -40,13 +102,34 @@ class WalletService {
         let wallet = walletOps.get(discordId);
         
         if (!wallet) {
-            // Create new wallet
-            const depositAddress = this.generateDepositAddress(discordId);
-            walletOps.create(discordId, depositAddress);
+            // Get next available derivation index
+            const derivationIndex = this._getNextDerivationIndex();
+            
+            // Create new wallet with real address
+            const depositAddress = this.generateDepositAddress(discordId, derivationIndex);
+            
+            // Store wallet with derivation index
+            const stmt = db.prepare(`
+                INSERT INTO user_wallets (discord_id, deposit_address, derivation_index) 
+                VALUES (?, ?, ?)
+            `);
+            stmt.run(discordId, depositAddress, derivationIndex);
+            
             wallet = walletOps.get(discordId);
         }
         
         return wallet;
+    }
+
+    /**
+     * Get next available derivation index
+     * @returns {number} Next derivation index
+     */
+    _getNextDerivationIndex() {
+        const stmt = db.prepare('SELECT MAX(derivation_index) as max_index FROM user_wallets');
+        const result = stmt.get();
+        const maxIndex = result && result.max_index !== null ? result.max_index : -1;
+        return maxIndex + 1;
     }
 
     /**
@@ -195,9 +278,9 @@ class WalletService {
     }
 
     /**
-     * Withdraw funds from wallet
+     * Withdraw funds from wallet - executes real blockchain transaction
      * @param {string} discordId - Discord user ID
-     * @param {number} amount - Amount to withdraw
+     * @param {number} amount - Amount to withdraw in ETH
      * @param {string} toAddress - Destination address
      * @returns {Object} Withdrawal result
      */
@@ -218,22 +301,90 @@ class WalletService {
             throw new Error(`Minimum withdrawal is ${minWithdrawal} ETH`);
         }
 
-        // In production, this would actually send the transaction on blockchain
-        // For now, we'll simulate with a fake tx hash
-        const fakeTxHash = `0x${crypto.randomBytes(32).toString('hex')}`;
-        
+        // Validate destination address
+        if (!ethers.isAddress(toAddress)) {
+            throw new Error('Invalid destination address');
+        }
+
+        // Check if master wallet is configured
+        if (!this.masterWallet) {
+            throw new Error('Withdrawal system not configured. Please contact administrator.');
+        }
+
         try {
-            walletOps.withdraw(discordId, amount, fakeTxHash, `Withdrawal of ${amount} ETH to ${toAddress}`);
+            // Check master wallet balance
+            const masterBalance = await this.masterWallet.provider.getBalance(this.masterWallet.address);
+            const amountWei = ethers.parseEther(amount.toString());
+            
+            // Estimate gas for the transaction
+            // 21000 is the standard gas for simple ETH transfer
+            // Could be made configurable via env var if needed
+            const gasEstimate = BigInt(process.env.WITHDRAWAL_GAS_LIMIT || '21000');
+            const feeData = await this.masterWallet.provider.getFeeData();
+            const maxFeePerGas = feeData.maxFeePerGas || feeData.gasPrice;
+            
+            // Check max gas price limit
+            const maxGasPriceGwei = BigInt(process.env.MAX_GAS_PRICE_GWEI || '100');
+            const maxGasPriceWei = maxGasPriceGwei * 1000000000n;
+            
+            // Handle both EIP-1559 and legacy gas pricing
+            const effectiveGasPrice = maxFeePerGas || feeData.gasPrice;
+            if (!effectiveGasPrice) {
+                throw new Error('Unable to estimate gas price. Try again later.');
+            }
+            
+            if (effectiveGasPrice > maxGasPriceWei) {
+                throw new Error(`Gas price too high (${ethers.formatUnits(effectiveGasPrice, 'gwei')} gwei). Try again later.`);
+            }
+            
+            const estimatedGasCost = gasEstimate * effectiveGasPrice;
+            
+            const totalRequired = amountWei + estimatedGasCost;
+
+            if (masterBalance < totalRequired) {
+                throw new Error('Hot wallet has insufficient funds. Please contact administrator.');
+            }
+
+            // Execute the withdrawal transaction
+            console.log(`💸 Executing withdrawal: ${amount} ETH to ${toAddress}`);
+            const tx = await this.masterWallet.sendTransaction({
+                to: toAddress,
+                value: amountWei,
+                gasLimit: gasEstimate
+            });
+
+            console.log(`✅ Withdrawal transaction sent: ${tx.hash}`);
+
+            // Update database with pending transaction
+            walletOps.withdraw(discordId, amount, tx.hash, `Withdrawal of ${amount} ETH to ${toAddress}`);
             
             return {
                 success: true,
                 amount,
                 toAddress,
-                txHash: fakeTxHash,
+                txHash: tx.hash,
                 status: 'pending'
             };
         } catch (error) {
+            console.error('❌ Withdrawal failed:', error);
             throw new Error(`Failed to withdraw funds: ${error.message}`);
+        }
+    }
+
+    /**
+     * Get master wallet balance
+     * @returns {Promise<string>} Balance in ETH
+     */
+    async getMasterWalletBalance() {
+        if (!this.masterWallet) {
+            return '0.0';
+        }
+        try {
+            const balance = await this.masterWallet.provider.getBalance(this.masterWallet.address);
+            return ethers.formatEther(balance);
+        } catch (error) {
+            console.error('Error fetching master wallet balance:', error);
+            return '0.0';
         }
     }
 
