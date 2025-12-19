@@ -144,6 +144,70 @@ function initializeDatabase() {
         // Column already exists
     }
 
+    // Add mode column to wagers table
+    try {
+        db.exec(`ALTER TABLE wagers ADD COLUMN mode TEXT`);
+    } catch (e) {
+        // Column already exists
+    }
+
+    // Add ready check columns to wagers table
+    try {
+        db.exec(`ALTER TABLE wagers ADD COLUMN ready_deadline DATETIME`);
+    } catch (e) {
+        // Column already exists
+    }
+
+    try {
+        db.exec(`ALTER TABLE wagers ADD COLUMN creator_ready INTEGER DEFAULT 0`);
+    } catch (e) {
+        // Column already exists
+    }
+
+    try {
+        db.exec(`ALTER TABLE wagers ADD COLUMN opponent_ready INTEGER DEFAULT 0`);
+    } catch (e) {
+        // Column already exists
+    }
+
+    // Add confirmation columns to wagers table
+    try {
+        db.exec(`ALTER TABLE wagers ADD COLUMN submitted_by TEXT`);
+    } catch (e) {
+        // Column already exists
+    }
+
+    try {
+        db.exec(`ALTER TABLE wagers ADD COLUMN confirm_deadline DATETIME`);
+    } catch (e) {
+        // Column already exists
+    }
+
+    // Add verification columns to linked_accounts table
+    try {
+        db.exec(`ALTER TABLE linked_accounts ADD COLUMN verification_method TEXT`);
+    } catch (e) {
+        // Column already exists
+    }
+
+    try {
+        db.exec(`ALTER TABLE linked_accounts ADD COLUMN tracker_url TEXT`);
+    } catch (e) {
+        // Column already exists
+    }
+
+    try {
+        db.exec(`ALTER TABLE linked_accounts ADD COLUMN platform_profile_url TEXT`);
+    } catch (e) {
+        // Column already exists
+    }
+
+    try {
+        db.exec(`ALTER TABLE linked_accounts ADD COLUMN last_verified DATETIME`);
+    } catch (e) {
+        // Column already exists
+    }
+
     // Add counter_proof column to disputes table
     try {
         db.exec(`ALTER TABLE disputes ADD COLUMN counter_proof TEXT`);
@@ -231,6 +295,36 @@ function initializeDatabase() {
         )
     `);
 
+    // User reputation table
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS user_reputation (
+            discord_id TEXT PRIMARY KEY,
+            score INTEGER DEFAULT 100,
+            total_wagers INTEGER DEFAULT 0,
+            completed INTEGER DEFAULT 0,
+            no_shows INTEGER DEFAULT 0,
+            disputes_won INTEGER DEFAULT 0,
+            disputes_lost INTEGER DEFAULT 0,
+            false_claims INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (discord_id) REFERENCES users(discord_id)
+        )
+    `);
+
+    // Reputation events table (history)
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS reputation_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            discord_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            points INTEGER NOT NULL,
+            wager_id INTEGER,
+            description TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (discord_id) REFERENCES users(discord_id)
+        )
+    `);
+
     console.log('✅ Database initialized successfully');
 }
 
@@ -288,14 +382,14 @@ const linkedAccountOps = {
 
 // Wager operations
 const wagerOps = {
-    create(creatorId, opponentId, game, amount, teamSize = 1, wagerType = 'solo', creatorTeamId = null, opponentTeamId = null, matchType = 'ranked') {
+    create(creatorId, opponentId, game, amount, teamSize = 1, wagerType = 'solo', creatorTeamId = null, opponentTeamId = null, matchType = 'ranked', mode = null) {
         const stmt = db.prepare(`
             INSERT INTO wagers 
-            (creator_id, opponent_id, game, amount, status, team_size, wager_type, creator_team_id, opponent_team_id, match_type) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (creator_id, opponent_id, game, amount, status, team_size, wager_type, creator_team_id, opponent_team_id, match_type, mode) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
         const status = opponentId ? 'accepted' : 'open';
-        const result = stmt.run(creatorId, opponentId, game, amount, status, teamSize, wagerType, creatorTeamId, opponentTeamId, matchType);
+        const result = stmt.run(creatorId, opponentId, game, amount, status, teamSize, wagerType, creatorTeamId, opponentTeamId, matchType, mode);
         return result.lastInsertRowid;
     },
 
@@ -310,8 +404,46 @@ const wagerOps = {
     },
 
     submit(wagerId, matchId, winnerId, proofUrl = null) {
-        const stmt = db.prepare('UPDATE wagers SET match_id = ?, winner_id = ?, proof_url = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
-        return stmt.run(matchId, winnerId, proofUrl, 'pending_verification', wagerId);
+        const stmt = db.prepare('UPDATE wagers SET match_id = ?, winner_id = ?, proof_url = ?, submitted_by = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+        return stmt.run(matchId, winnerId, proofUrl, winnerId, 'pending_verification', wagerId);
+    },
+
+    setReadyDeadline(wagerId, deadline) {
+        const stmt = db.prepare('UPDATE wagers SET ready_deadline = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+        return stmt.run(deadline.toISOString(), 'pending_ready', wagerId);
+    },
+
+    setCreatorReady(wagerId) {
+        const stmt = db.prepare('UPDATE wagers SET creator_ready = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+        return stmt.run(wagerId);
+    },
+
+    setOpponentReady(wagerId) {
+        const stmt = db.prepare('UPDATE wagers SET opponent_ready = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+        return stmt.run(wagerId);
+    },
+
+    setConfirmDeadline(wagerId, deadline) {
+        const stmt = db.prepare('UPDATE wagers SET confirm_deadline = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+        return stmt.run(deadline.toISOString(), wagerId);
+    },
+
+    getExpiredReadyChecks() {
+        const stmt = db.prepare(`
+            SELECT * FROM wagers 
+            WHERE status = 'pending_ready' 
+            AND ready_deadline < datetime('now')
+        `);
+        return stmt.all();
+    },
+
+    getExpiredConfirmations() {
+        const stmt = db.prepare(`
+            SELECT * FROM wagers 
+            WHERE status = 'pending_confirmation' 
+            AND confirm_deadline < datetime('now')
+        `);
+        return stmt.all();
     },
 
     complete(wagerId, winnerId) {
@@ -774,6 +906,87 @@ const walletOps = {
     }
 };
 
+// Reputation operations
+const reputationOps = {
+    create(discordId) {
+        const stmt = db.prepare(`
+            INSERT OR IGNORE INTO user_reputation (discord_id) 
+            VALUES (?)
+        `);
+        return stmt.run(discordId);
+    },
+
+    get(discordId) {
+        // Ensure reputation record exists
+        this.create(discordId);
+        
+        const stmt = db.prepare('SELECT * FROM user_reputation WHERE discord_id = ?');
+        return stmt.get(discordId);
+    },
+
+    addEvent(discordId, eventType, points, wagerId = null, description = '') {
+        const transaction = db.transaction(() => {
+            // Update reputation score
+            const updateStmt = db.prepare(`
+                UPDATE user_reputation 
+                SET score = score + ?,
+                    total_wagers = CASE WHEN ? = 'WAGER_COMPLETE' THEN total_wagers + 1 ELSE total_wagers END,
+                    completed = CASE WHEN ? = 'WAGER_COMPLETE' THEN completed + 1 ELSE completed END,
+                    no_shows = CASE WHEN ? = 'NO_SHOW' THEN no_shows + 1 ELSE no_shows END,
+                    disputes_won = CASE WHEN ? = 'DISPUTE_WON' THEN disputes_won + 1 ELSE disputes_won END,
+                    disputes_lost = CASE WHEN ? = 'DISPUTE_LOST' THEN disputes_lost + 1 ELSE disputes_lost END,
+                    false_claims = CASE WHEN ? = 'FALSE_WIN_CLAIM' THEN false_claims + 1 ELSE false_claims END
+                WHERE discord_id = ?
+            `);
+            updateStmt.run(points, eventType, eventType, eventType, eventType, eventType, eventType, discordId);
+
+            // Record event
+            const eventStmt = db.prepare(`
+                INSERT INTO reputation_events 
+                (discord_id, event_type, points, wager_id, description) 
+                VALUES (?, ?, ?, ?, ?)
+            `);
+            return eventStmt.run(discordId, eventType, points, wagerId, description);
+        });
+        
+        return transaction();
+    },
+
+    getEvents(discordId, limit = 10) {
+        const stmt = db.prepare(`
+            SELECT * FROM reputation_events 
+            WHERE discord_id = ? 
+            ORDER BY created_at DESC 
+            LIMIT ?
+        `);
+        return stmt.all(discordId, limit);
+    },
+
+    canCreateWager(discordId) {
+        const rep = this.get(discordId);
+        return rep.score >= 50;
+    },
+
+    canWager(discordId) {
+        const rep = this.get(discordId);
+        return rep.score >= 25;
+    },
+
+    getWarning(discordId) {
+        const rep = this.get(discordId);
+        if (rep.score < 75 && rep.score >= 50) {
+            return `⚠️ This player has low reputation (${rep.score}/100)`;
+        }
+        if (rep.score < 50 && rep.score >= 25) {
+            return `⚠️ WARNING: This player has very low reputation (${rep.score}/100)`;
+        }
+        if (rep.score < 25) {
+            return `🚫 This player is restricted from wagering (${rep.score}/100)`;
+        }
+        return null;
+    }
+};
+
 module.exports = {
     initializeDatabase,
     userOps,
@@ -786,5 +999,6 @@ module.exports = {
     participantOps,
     escrowOps,
     walletOps,
+    reputationOps,
     db
 };
