@@ -5,6 +5,7 @@ require('dotenv').config();
 
 const { initializeDatabase } = require('./services/database');
 const SchedulerService = require('./services/scheduler');
+const DepositMonitorService = require('./services/depositMonitor');
 
 // Create a new client instance
 const client = new Client({
@@ -17,8 +18,9 @@ const client = new Client({
     ]
 });
 
-// Initialize scheduler
+// Initialize scheduler and deposit monitor
 let schedulerService;
+let depositMonitor;
 
 // Initialize commands collection
 client.commands = new Collection();
@@ -63,10 +65,14 @@ try {
     process.exit(1);
 }
 
-// Start scheduler when bot is ready
+// Start scheduler and deposit monitor when bot is ready
 client.once('ready', () => {
     schedulerService = new SchedulerService(client);
     schedulerService.start();
+    
+    // Start deposit monitoring service
+    depositMonitor = new DepositMonitorService(client);
+    depositMonitor.start();
 });
 
 // Error handling
@@ -76,6 +82,23 @@ client.on('error', error => {
 
 process.on('unhandledRejection', error => {
     console.error('Unhandled promise rejection:', error);
+});
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+    console.log('\n🛑 Shutting down gracefully...');
+    if (depositMonitor) {
+        depositMonitor.stop();
+    }
+    process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+    console.log('\n🛑 Shutting down gracefully...');
+    if (depositMonitor) {
+        depositMonitor.stop();
+    }
+    process.exit(0);
 });
 
 // Login to Discord

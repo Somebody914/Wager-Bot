@@ -215,6 +215,20 @@ function initializeDatabase() {
         // Column already exists
     }
 
+    // Add derivation_index column to user_wallets table for HD wallet support
+    try {
+        db.exec(`ALTER TABLE user_wallets ADD COLUMN derivation_index INTEGER`);
+    } catch (e) {
+        // Column already exists
+    }
+
+    // Add last_checked_block column to user_wallets table for deposit monitoring
+    try {
+        db.exec(`ALTER TABLE user_wallets ADD COLUMN last_checked_block INTEGER DEFAULT 0`);
+    } catch (e) {
+        // Column already exists
+    }
+
     // Dispute votes table (for community voting system)
     db.exec(`
         CREATE TABLE IF NOT EXISTS dispute_votes (
