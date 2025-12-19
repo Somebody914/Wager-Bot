@@ -25,7 +25,9 @@ class WalletService {
             this.hdNode = null;
         } else {
             try {
-                this.hdNode = ethers.HDNodeWallet.fromPhrase(mnemonic);
+                // Create HD wallet at account level (m/44'/60'/0'/0)
+                // This allows us to derive addresses at m/44'/60'/0'/0/{index}
+                this.hdNode = ethers.HDNodeWallet.fromPhrase(mnemonic, undefined, "m/44'/60'/0'/0");
             } catch (error) {
                 console.error('❌ Invalid HD_WALLET_MNEMONIC:', error.message);
                 this.hdNode = null;
@@ -68,12 +70,12 @@ class WalletService {
 
         // Use BIP44 derivation path: m/44'/60'/0'/0/{index}
         // 60 is the coin type for Ethereum
-        // Since HDNodeWallet.fromPhrase creates at m/44'/60'/0'/0, we derive relative path
+        // hdNode is at m/44'/60'/0'/0, deriveChild creates m/44'/60'/0'/0/{index}
         const childWallet = this.hdNode.deriveChild(derivationIndex);
         
         // Log without exposing user ID for privacy
         const addrShort = `${childWallet.address.slice(0, 6)}...${childWallet.address.slice(-4)}`;
-        console.log(`✅ Generated real deposit address (index ${derivationIndex}): ${addrShort}`);
+        console.log(`✅ Generated real deposit address (index ${derivationIndex}, path: ${childWallet.path}): ${addrShort}`);
         return childWallet.address;
     }
 
@@ -315,7 +317,9 @@ class WalletService {
             const amountWei = ethers.parseEther(amount.toString());
             
             // Estimate gas for the transaction
-            const gasEstimate = 21000n; // Standard ETH transfer
+            // 21000 is the standard gas for simple ETH transfer
+            // Could be made configurable via env var if needed
+            const gasEstimate = BigInt(process.env.WITHDRAWAL_GAS_LIMIT || '21000');
             const feeData = await this.masterWallet.provider.getFeeData();
             const maxFeePerGas = feeData.maxFeePerGas || feeData.gasPrice;
             

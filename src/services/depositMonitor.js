@@ -167,13 +167,15 @@ class DepositMonitorService {
         
         const knownDeposits = stmt?.total_deposited || 0;
         
-        // Calculate expected on-chain balance (deposits minus withdrawals)
-        // Note: held_balance is stored in the bot's tracking, not on-chain
-        const expectedBalance = knownDeposits - (wallet.total_withdrawn || 0);
+        // Calculate expected on-chain balance
+        // Note: User deposit addresses only RECEIVE funds, never send
+        // Withdrawals are sent FROM master wallet, not user addresses
+        // So on-chain balance should equal total known deposits
+        const expectedBalance = knownDeposits;
         
         // If current balance is higher than expected, there's a new deposit
         // Using a small tolerance for floating point comparison
-        const tolerance = 0.000001; // 1 gwei tolerance
+        const tolerance = 0.000001; // ~1000 gwei tolerance
         if (currentBalance > expectedBalance + tolerance && currentBalance >= this.minDepositEth) {
             const newDepositAmount = currentBalance - expectedBalance;
             
@@ -192,10 +194,9 @@ class DepositMonitorService {
      * @param {string} address - Deposit address
      */
     async processNewDeposit(wallet, amount, blockNumber, address) {
-        // Convert to wei for precise comparison
-        const { ethers } = require('ethers');
+        // Convert to wei for precise comparison (ethers already imported at top)
         const amountWei = ethers.parseEther(amount.toFixed(18));
-        const tolerance = ethers.parseEther('0.0001'); // 0.0001 ETH tolerance
+        const tolerance = ethers.parseEther('0.0001'); // 0.0001 ETH tolerance (~100,000 gwei)
         
         // Check if we've already processed a similar deposit recently
         // Use wei-based comparison for precision
