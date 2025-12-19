@@ -45,7 +45,14 @@ module.exports = {
 
         try {
             const balance = await walletService.getMasterWalletBalance();
-            const masterAddress = process.env.MASTER_WALLET_ADDRESS || 'Not configured';
+            
+            // Get address from wallet service if available
+            let masterAddress = 'Not configured';
+            if (walletService.masterWallet) {
+                masterAddress = walletService.masterWallet.address;
+            } else if (process.env.MASTER_WALLET_ADDRESS) {
+                masterAddress = process.env.MASTER_WALLET_ADDRESS;
+            }
 
             const embed = new EmbedBuilder()
                 .setTitle('🏦 Hot Wallet Status')

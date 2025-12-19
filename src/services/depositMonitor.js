@@ -157,7 +157,8 @@ class DepositMonitorService {
         // In production, you should use Etherscan API or run your own archive node
         // to efficiently get transaction history
         
-        // For basic functionality, we'll compare expected balance with actual balance
+        // Calculate expected balance from transaction history
+        // This accounts for deposits and withdrawals, but not funds in wagers or fees
         const stmt = db.prepare(`
             SELECT SUM(amount) as total_deposited 
             FROM wallet_transactions 
@@ -165,13 +166,18 @@ class DepositMonitorService {
         `).get(wallet.discord_id);
         
         const knownDeposits = stmt?.total_deposited || 0;
+        
+        // Calculate expected on-chain balance (deposits minus withdrawals)
+        // Note: held_balance is stored in the bot's tracking, not on-chain
         const expectedBalance = knownDeposits - (wallet.total_withdrawn || 0);
         
         // If current balance is higher than expected, there's a new deposit
-        if (currentBalance > expectedBalance && currentBalance >= this.minDepositEth) {
+        // Using a small tolerance for floating point comparison
+        const tolerance = 0.000001; // 1 gwei tolerance
+        if (currentBalance > expectedBalance + tolerance && currentBalance >= this.minDepositEth) {
             const newDepositAmount = currentBalance - expectedBalance;
             
-            // Only process if the new amount is significant
+            // Only process if the new amount is significant (above minimum)
             if (newDepositAmount >= this.minDepositEth) {
                 await this.processNewDeposit(wallet, newDepositAmount, endBlock, address);
             }
@@ -186,23 +192,34 @@ class DepositMonitorService {
      * @param {string} address - Deposit address
      */
     async processNewDeposit(wallet, amount, blockNumber, address) {
+        // Convert to wei for precise comparison
+        const { ethers } = require('ethers');
+        const amountWei = ethers.parseEther(amount.toFixed(18));
+        const tolerance = ethers.parseEther('0.0001'); // 0.0001 ETH tolerance
+        
         // Check if we've already processed a similar deposit recently
+        // Use wei-based comparison for precision
         const recentTx = db.prepare(`
             SELECT * FROM wallet_transactions 
             WHERE discord_id = ? AND type = 'deposit' 
-            AND ABS(amount - ?) < 0.0001
             AND created_at > datetime('now', '-1 hour')
-        `).get(wallet.discord_id, amount);
+        `).all(wallet.discord_id);
 
-        if (recentTx) {
-            console.log(`⚠️  Similar deposit already processed for ${wallet.discord_id}`);
-            return;
+        // Check if any recent transaction is within tolerance
+        for (const tx of recentTx) {
+            const txAmountWei = ethers.parseEther(tx.amount.toFixed(18));
+            const diff = txAmountWei > amountWei ? txAmountWei - amountWei : amountWei - txAmountWei;
+            if (diff < tolerance) {
+                console.log(`⚠️  Similar deposit already processed (within tolerance)`);
+                return;
+            }
         }
 
         // Generate a transaction reference
         const txRef = `deposit_${blockNumber}_${address.slice(0, 10)}`;
+        const addrShort = `${address.slice(0, 6)}...${address.slice(-4)}`;
 
-        console.log(`💰 New deposit detected: ${amount.toFixed(4)} ETH for user ${wallet.discord_id}`);
+        console.log(`💰 New deposit detected: ${amount.toFixed(4)} ETH to ${addrShort}`);
 
         try {
             // Credit the user's balance
@@ -211,9 +228,9 @@ class DepositMonitorService {
             // Notify user via DM
             await this.notifyUserOfDeposit(wallet.discord_id, amount, txRef);
             
-            console.log(`✅ Credited ${amount.toFixed(4)} ETH to ${wallet.discord_id}`);
+            console.log(`✅ Credited ${amount.toFixed(4)} ETH to user`);
         } catch (error) {
-            console.error(`❌ Failed to credit deposit for ${wallet.discord_id}:`, error.message);
+            console.error(`❌ Failed to credit deposit:`, error.message);
         }
     }
 

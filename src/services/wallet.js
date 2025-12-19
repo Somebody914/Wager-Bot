@@ -40,7 +40,9 @@ class WalletService {
         } else {
             try {
                 this.masterWallet = new ethers.Wallet(masterKey, this.provider);
-                console.log(`✅ Master wallet initialized: ${this.masterWallet.address}`);
+                // Log only first and last 6 chars for security
+                const addrShort = `${this.masterWallet.address.slice(0, 6)}...${this.masterWallet.address.slice(-4)}`;
+                console.log(`✅ Master wallet initialized: ${addrShort}`);
             } catch (error) {
                 console.error('❌ Invalid MASTER_WALLET_PRIVATE_KEY:', error.message);
                 this.masterWallet = null;
@@ -69,7 +71,9 @@ class WalletService {
         // Since HDNodeWallet.fromPhrase creates at m/44'/60'/0'/0, we derive relative path
         const childWallet = this.hdNode.deriveChild(derivationIndex);
         
-        console.log(`✅ Generated real deposit address for user ${discordId}: ${childWallet.address}`);
+        // Log without exposing user ID for privacy
+        const addrShort = `${childWallet.address.slice(0, 6)}...${childWallet.address.slice(-4)}`;
+        console.log(`✅ Generated real deposit address (index ${derivationIndex}): ${addrShort}`);
         return childWallet.address;
     }
 
@@ -318,11 +322,18 @@ class WalletService {
             const maxGasPriceGwei = BigInt(process.env.MAX_GAS_PRICE_GWEI || '100');
             const maxGasPriceWei = maxGasPriceGwei * 1000000000n;
             
-            if (maxFeePerGas > maxGasPriceWei) {
-                throw new Error(`Gas price too high (${ethers.formatUnits(maxFeePerGas, 'gwei')} gwei). Try again later.`);
+            // Handle both EIP-1559 and legacy gas pricing
+            const effectiveGasPrice = maxFeePerGas || feeData.gasPrice;
+            if (!effectiveGasPrice) {
+                throw new Error('Unable to estimate gas price. Try again later.');
             }
             
-            const estimatedGasCost = gasEstimate * maxFeePerGas;
+            if (effectiveGasPrice > maxGasPriceWei) {
+                throw new Error(`Gas price too high (${ethers.formatUnits(effectiveGasPrice, 'gwei')} gwei). Try again later.`);
+            }
+            
+            const estimatedGasCost = gasEstimate * effectiveGasPrice;
+            
             const totalRequired = amountWei + estimatedGasCost;
 
             if (masterBalance < totalRequired) {
